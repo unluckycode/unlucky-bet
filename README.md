@@ -67,7 +67,9 @@ wdrożeniu i restarcie – plik SQLite by zniknął.
 ### Krok 1. Baza danych w Neon (ok. 5 min)
 
 1. Wejdź na <https://neon.tech> → **Sign up** (najprościej „Continue with GitHub” lub Google).
-2. Utwórz projekt: **Create project** → nazwa np. `unlucky-bet`, region **Europe (Frankfurt)** → **Create**.
+2. Utwórz projekt: **Create project** → nazwa np. `unlucky-bet`, region **AWS US East 2 (Ohio)** → **Create**.
+   Region bazy powinien zgadzać się z regionem usługi w `render.yaml` (`region: ohio`). Jeśli wybierzesz inny
+   region Neon (np. Frankfurt), zmień też `region` w `render.yaml` (np. na `frankfurt`).
 3. Na pulpicie projektu kliknij **Connect** i skopiuj **Connection string** – wygląda tak:
    `postgresql://uzytkownik:haslo@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require`.
    Zachowaj go na chwilę (np. w notatniku) – to Twój `DATABASE_URL`.
