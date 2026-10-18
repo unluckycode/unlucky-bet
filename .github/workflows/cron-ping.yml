@@ -1,0 +1,27 @@
+# Opcjonalny "pinger" na GitHub Actions: co 30 min wywołuje /api/cron, co budzi uśpioną usługę
+# na darmowym Renderze, odświeża wyniki i wysyła powiadomienia push.
+# Wymaga sekretów repozytorium: APP_URL (np. https://unlucky-bet.onrender.com) i CRON_TOKEN.
+# Bez nich workflow kończy się bez błędu. Uwaga: GitHub potrafi opóźniać zadania cykliczne
+# i wyłącza je po 60 dniach braku aktywności w repozytorium – pewniejszy jest cron-job.org (README).
+name: cron-ping
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wywołaj /api/cron
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_TOKEN" ]; then
+            echo "Brak sekretów APP_URL / CRON_TOKEN – pomijam."
+            exit 0
+          fi
+          # Pierwsze wywołanie budzi usługę (zimny start na Renderze trwa do ~1 min).
+          curl -fsS --max-time 120 --retry 3 --retry-delay 20 "$APP_URL/api/cron?token=$CRON_TOKEN" || true
