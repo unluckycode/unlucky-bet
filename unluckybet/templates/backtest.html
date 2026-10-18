@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Backtest{% endblock %}
+{% block content %}
+<div class="topbar"><h1>Backtest strategii</h1></div>
+
+<section class="card">
+  <form method="get" class="stack">
+    <div class="fields wide">
+      <label>Liga
+        <select name="league" onchange="this.form.submit()">
+          {% for s in summaries|sort(attribute='overlap_rate') %}
+            <option value="{{ s.code }}" {{ 'selected' if s.code == code }}>{{ s.league.country }} – {{ s.league.name }} ({{ s.overlap_rate|pct(0) }})</option>
+          {% endfor %}
+        </select></label>
+      <label>Od sezonu
+        <select name="since">{% for se in seasons %}<option {{ 'selected' if se == since }}>{{ se }}</option>{% endfor %}</select></label>
+      <label>Próg X<input type="number" name="threshold" min="1" max="40" value="{{ params.threshold }}"></label>
+      <label>Stawka bazowa (zł)<input type="number" name="base_stake" min="1" step="0.01" value="{{ params.base_stake }}"></label>
+      <label>Mnożnik<input type="number" name="multiplier" min="1" step="0.01" value="{{ params.multiplier }}"></label>
+      <label>Maks. kroków (0 = ∞)<input type="number" name="max_steps" min="0" max="30" value="{{ params.max_steps }}"></label>
+      <label>Bankroll (0 = ∞)<input type="number" name="bankroll" min="0" step="1" value="{{ params.bankroll|round(0)|int }}"></label>
+      <label>Kurs
+        <select name="odds_mode">
+          {% for k, v in [('avg','Średni rynkowy'),('max','Najlepszy na rynku'),('b365','Bet365'),('fixed','Stały')] %}
+            <option value="{{ k }}" {{ 'selected' if params.odds_mode == k }}>{{ v }}</option>
+          {% endfor %}
+        </select></label>
+      <label>Stały / zapasowy kurs<input type="number" name="fixed_odds" min="1.01" step="0.01" value="{{ params.fixed_odds }}"></label>
+        <label>Podatek od stawki (%)<input type="number" name="tax_pct" min="0" max="50" step="0.1" value="{{ (params.tax * 100)|round(1) }}"></label>
+    </div>
+    <div class="actions"><button class="btn primary">Uruchom backtest</button>
+      <span class="hint">{{ rows|length }} meczów · {{ rows[0].date|dpl if rows }} – {{ rows[-1].date|dpl if rows }} · kapitał na pełny cykl: {{ capital|zl }}</span></div>
+  </form>
+</section>
+
+{% set st = result.state %}
+<div class="grid kpis" style="margin-top:14px">
+  <div class="card kpi"><div class="label">Wynik netto</div><div class="value {{ 'pos' if st.pnl > 0 else 'neg' }}">{{ st.pnl|zl(true) }}</div><div class="sub">ROI {{ result.roi|pct }} od postawionych</div></div>
+  <div class="card kpi"><div class="label">Cykle</div><div class="value">{{ result.cycles|length }}</div><div class="sub">{{ result.wins }} wygranych · {{ result.stops }} stop-loss</div></div>
+  <div class="card kpi"><div class="label">Maks. obsunięcie</div><div class="value neg">{{ result.max_drawdown|zl }}</div><div class="sub">najgłębszy krok: {{ result.max_step }}</div></div>
+  <div class="card kpi"><div class="label">Postawiono</div><div class="value">{{ result.total_staked|zl }}</div><div class="sub">{{ result.bets|length }} zakładów{% if result.missing_odds %} · {{ result.missing_odds }} bez kursu{% endif %}</div></div>
+</div>
+
+{% if result.ruin_date %}
+  <div class="callout bad"><strong>Bankructwo {{ result.ruin_date|dpl }}</strong> – bankroll nie pokrył kolejnej stawki. Symulacja zatrzymana.</div>
+{% endif %}
+{% if st.in_cycle and not result.ruin_date %}
+  <div class="callout warn">Na końcu danych trwa niezakończony cykl (krok {{ st.step }}, strata {{ st.cycle_loss|zl }}) – jest już wliczona w wynik.</div>
+{% endif %}
+
+<section class="card" style="margin-top:14px">
+  <h2>Saldo w czasie</h2>
+  <div class="chart-box"><canvas id="equityChart"></canvas></div>
+</section>
+
+<div class="grid cols-2" style="margin-top:14px">
+  <section class="card">
+    <h2>Wynik dla różnych progów X</h2>
+    <p class="muted">Te same ustawienia, zmienia się tylko X. Duży rozrzut między sąsiednimi X to sygnał, że wynik to głównie szum.</p>
+    <div class="table-wrap"><table>
+      <tr><th class="num">X</th><th class="num">Zakłady</th><th class="num">Cykle</th><th class="num">Stop</th><th class="num">Wynik</th><th class="num">ROI</th><th class="num">Obsunięcie</th></tr>
+      {% for r in sweep %}
+        <tr class="{{ 'hl' if r.x == params.threshold }}"><td class="num"><a href="{{ url_for('backtest', threshold=r.x, **link_args) }}">{{ r.x }}</a></td>
+          <td class="num">{{ r.bets }}</td><td class="num">{{ r.cycles }}</td><td class="num">{{ r.stops }}</td>
+          <td class="num {{ 'pos' if r.pnl > 0 else 'neg' }}">{{ r.pnl|zl(true) }}</td><td class="num">{{ r.roi|pct }}</td><td class="num">{{ r.dd|zl }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </section>
+  <section class="card">
+    <h2>Cykle zakończone stratą</h2>
+    {% set losses = result.cycles|selectattr('outcome', 'ne', 'wygrana')|list %}
+    {% if losses %}
+      <div class="table-wrap"><table>
+        <tr><th>Start</th><th>Koniec</th><th class="num">Seria na starcie</th><th class="num">Kroki</th><th class="num">Wynik</th><th>Typ</th></tr>
+        {% for c in losses|reverse %}
+          <tr><td>{{ c.start|dpl }}</td><td>{{ c.end|dpl }}</td><td class="num">{{ c.streak_at_start }}</td><td class="num">{{ c.steps }}</td>
+            <td class="num neg">{{ (c.profit if c.end else -c.loss)|zl(true) }}</td><td>{{ c.outcome }}</td></tr>
+        {% endfor %}
+      </table></div>
+    {% else %}
+      <p class="muted">Brak cykli zakończonych stratą w tym okresie – co nie znaczy, że ryzyko nie istnieje.</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card" style="margin-top:14px">
+  <h2>Ostatnie zakłady w symulacji</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Data</th><th>Mecz</th><th class="num">Krok</th><th class="num">Stawka</th><th class="num">Kurs</th><th class="num">Wynik</th><th class="num">Saldo</th></tr>
+    {% for b in result.bets[-60:]|reverse %}
+      <tr><td>{{ b.date|dpl }} {{ b.time }}</td><td>{{ b.home }} {{ b.score }} {{ b.away }}{% if b.parallel > 1 %} <span class="badge warn">{{ b.parallel }} naraz</span>{% endif %}</td>
+        <td class="num">{{ b.step }}</td><td class="num">{{ b.stake|zl }}</td><td class="num">{{ b.odds|num }}</td>
+        <td class="num {{ 'pos' if b.won else 'neg' }}">{{ b.profit|zl(true) }}</td><td class="num">{{ b.pnl|zl(true) }}</td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="hint">Zasady: cykl startuje, gdy przed meczem seria bez remisu ≥ X; trwa do remisu w obstawionym meczu lub do limitu kroków.
+    Po stop-lossie nowy cykl dopiero po kolejnym remisie i nowej serii X. Gdy kilka meczów gra o tej samej godzinie, obstawiany jest jeden (pierwszy alfabetycznie).</p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script>
+const eq = {{ result.equity|tojson }};
+UBCharts.line('equityChart', eq.map(e => e[0]), [{ label: 'Saldo (zł)', data: eq.map(e => e[1]), color: '#22c55e', fill: true }], ' zł', true);
+</script>
+{% endblock %}

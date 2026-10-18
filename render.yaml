@@ -1,0 +1,33 @@
+# Blueprint Render: https://render.com/docs/blueprint-spec
+# Darmowy plan: usługa usypia po ~15 min bez ruchu, dysk jest ulotny –
+# dlatego dane trzymamy w zewnętrznym PostgreSQL (np. Neon) przez DATABASE_URL.
+services:
+  - type: web
+    name: unlucky-bet
+    runtime: python
+    plan: free
+    region: ohio             # ten sam region co baza Neon (us-east-2) – mniejsze opóźnienia
+    buildCommand: pip install -r requirements.txt
+    # Jeden proces (wspólna pamięć podręczna i harmonogram), kilka wątków.
+    startCommand: gunicorn -w 1 --threads 8 --timeout 180 -b 0.0.0.0:$PORT wsgi:app
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: DATABASE_URL
+        sync: false          # wklej connection string z Neon (postgresql://...)
+      - key: APP_PASSWORD
+        sync: false          # hasło do portalu
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CRON_TOKEN
+        generateValue: true  # token do /api/cron?token=... (zewnętrzny pinger)
+      - key: VAPID_PUBLIC_KEY
+        sync: false          # opcjonalnie – powiadomienia push
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false          # np. mailto:twoj-email@example.com
+      - key: REFRESH_INTERVAL_MIN
+        value: "60"

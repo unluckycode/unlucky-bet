@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Ustawienia{% endblock %}
+{% block content %}
+<div class="topbar"><h1>Ustawienia</h1></div>
+<div class="grid cols-2">
+  <section class="card">
+    <h2>Powiadomienia push</h2>
+    {% if push_enabled %}
+      <p class="muted">Dostaniesz powiadomienie, gdy seria w obserwowanej lidze osiągnie Twój próg X oraz gdy pojawi się wynik meczu z aktywnej strategii lub zapisanego zakładu.</p>
+      <p>Status na tym urządzeniu: <strong id="push-status">sprawdzam…</strong></p>
+      <div class="actions">
+        <button class="btn primary" id="push-on">Włącz powiadomienia</button>
+        <button class="btn" id="push-test">Wyślij test</button>
+        <button class="btn danger" id="push-off">Wyłącz</button>
+      </div>
+      <p class="hint">Zarejestrowane urządzenia: {{ subs }}. Na iPhonie powiadomienia działają tylko po dodaniu aplikacji do ekranu początkowego (iOS 16.4+).</p>
+    {% else %}
+      <div class="callout warn">Powiadomienia są wyłączone – brak kluczy <code>VAPID_PUBLIC_KEY</code> / <code>VAPID_PRIVATE_KEY</code>. Wygeneruj je poleceniem <code>python -m unluckybet vapid</code> i dodaj jako zmienne środowiskowe (instrukcja w README).</div>
+    {% endif %}
+  </section>
+  <section class="card">
+    <h2>Dane</h2>
+    <dl class="facts">
+      <div><dt>Ostatnie odświeżenie</dt><dd>{{ last_refresh or '–' }}</dd></div>
+      <div><dt>Baza danych</dt><dd>{{ backend }}</dd></div>
+      <div><dt>Zadanie cykliczne (/api/cron)</dt><dd>{{ 'skonfigurowane' if cron_configured else 'brak CRON_TOKEN' }}</dd></div>
+      <div><dt>Logowanie</dt><dd>{{ 'hasło włączone' if auth_enabled else 'wyłączone (brak APP_PASSWORD)' }}</dd></div>
+    </dl>
+    {% if errors %}<div class="callout warn">Błędy ostatniego pobierania: {{ errors }}</div>{% endif %}
+    <form method="post" action="/odswiez" class="actions">
+      <input type="hidden" name="back" value="/ustawienia">
+      <button class="btn" {{ 'disabled' if refreshing }}>↻ Odśwież bieżący sezon</button>
+      <button class="btn" name="full" value="1" {{ 'disabled' if refreshing }} onclick="return confirm('Pobrać wszystkie sezony od nowa? Może to potrwać kilka minut.')">Pobierz wszystko od nowa</button>
+    </form>
+    <div id="refresh-log" class="hint" style="margin-top:10px"></div>
+  </section>
+  <section class="card">
+    <h2>Aplikacja na telefonie</h2>
+    <p class="muted"><strong>Android (Chrome):</strong> menu ⋮ → „Zainstaluj aplikację” / „Dodaj do ekranu głównego”.</p>
+    <p class="muted"><strong>iPhone (Safari):</strong> przycisk Udostępnij → „Do ekranu początkowego”. Potem otwórz aplikację z ikony i włącz powiadomienia tutaj.</p>
+    <button class="btn" id="install-btn" hidden>Zainstaluj aplikację</button>
+  </section>
+  {% if auth_enabled %}
+  <section class="card">
+    <h2>Konto</h2>
+    <a class="btn" href="/logout">Wyloguj</a>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

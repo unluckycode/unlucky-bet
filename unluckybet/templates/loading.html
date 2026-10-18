@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Pobieranie danych{% endblock %}
+{% block content %}
+<div class="card" style="max-width:640px">
+  <h1><span class="spinner"></span> Pierwsze pobieranie danych</h1>
+  <p class="muted">Pobieram wyniki ~40 lig z ostatnich sezonów z football-data.co.uk. Pierwszy raz trwa to zwykle 3–6 minut,
+    kolejne odświeżenia są szybkie. Strona przeładuje się sama.</p>
+  <div id="refresh-log" class="hint"></div>
+</div>
+{% endblock %}
+{% block scripts %}<script>UB.refreshing = true; UBRefresh.poll(true);</script>{% endblock %}

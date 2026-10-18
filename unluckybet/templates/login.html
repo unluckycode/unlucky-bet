@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Logowanie · Unlucky Bet</title>
+  <meta name="theme-color" content="#0b1120">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3">
+</head>
+<body>
+<div class="login-wrap">
+  <form method="post" class="card login-card stack">
+    <div><img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt=""></div>
+    <h1>Unlucky Bet</h1>
+    <p class="muted" style="margin-top:-8px">Portal jest chroniony hasłem.</p>
+    {% if error %}<div class="callout bad">{{ error }}</div>{% endif %}
+    <label>Hasło<input type="password" name="password" autocomplete="current-password" autofocus required></label>
+    <button class="btn primary block">Zaloguj</button>
+  </form>
+</div>
+</body>
+</html>

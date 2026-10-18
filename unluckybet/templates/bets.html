@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Zakłady{% endblock %}
+{% block content %}
+<div class="topbar"><h1>Moje zakłady</h1></div>
+
+<div class="grid kpis">
+  <div class="card kpi"><div class="label">Wynik</div><div class="value {{ 'pos' if pnl > 0 else ('neg' if pnl < 0) }}">{{ pnl|zl(true) }}</div><div class="sub">rozliczone zakłady</div></div>
+  <div class="card kpi"><div class="label">Postawiono</div><div class="value">{{ staked|zl }}</div><div class="sub">ROI {{ (pnl / staked if staked else 0)|pct }}</div></div>
+  <div class="card kpi"><div class="label">Oczekujące</div><div class="value">{{ pending }}</div><div class="sub">rozliczą się po wyniku</div></div>
+  <div class="card kpi"><div class="label">Wszystkie</div><div class="value">{{ rows|length }}</div><div class="sub">zapisane zakłady</div></div>
+</div>
+
+<div class="grid cols-2" style="margin-top:14px">
+  <section class="card">
+    <h2>Dodaj zakład</h2>
+    <form method="post" class="stack">
+      <div class="fields">
+        <label>Liga
+          <select name="league">{% for lg in leagues %}<option value="{{ lg.code }}" {{ 'selected' if lg.code == prefill.league }}>{{ lg.country }} – {{ lg.name }}</option>{% endfor %}</select></label>
+        <label>Data meczu<input type="date" name="match_date" required value="{{ prefill.match_date }}"></label>
+        <label>Gospodarz<input name="home" required value="{{ prefill.home }}" placeholder="dokładnie jak w źródle"></label>
+        <label>Gość<input name="away" required value="{{ prefill.away }}"></label>
+        <label>Stawka (zł)<input name="stake" inputmode="decimal" required value="{{ prefill.stake }}"></label>
+        <label>Kurs na remis<input name="odds" inputmode="decimal" required value="{{ prefill.odds }}"></label>
+        <label>Podatek od stawki (%)<input name="tax_pct" inputmode="decimal" value="{{ prefill.tax_pct or 12 }}"></label>
+        <label>Krok martingale<input type="number" name="step" min="1" value="{{ prefill.step or 1 }}"></label>
+        <label>Notatka<input name="note" placeholder="np. bukmacher"></label>
+      </div>
+      <button class="btn primary">Zapisz zakład</button>
+      <p class="hint">Nazwy drużyn i data muszą zgadzać się ze źródłem danych, aby zakład rozliczył się automatycznie (przycisk „Zapisz zakład” na pulpicie wypełnia je sam).</p>
+    </form>
+  </section>
+  <section class="card">
+    <h2>Saldo w czasie</h2>
+    {% if history %}<div class="chart-box"><canvas id="pnlChart"></canvas></div>
+    {% else %}<p class="muted">Brak rozliczonych zakładów.</p>{% endif %}
+  </section>
+</div>
+
+<section class="card" style="margin-top:14px">
+  <h2>Historia</h2>
+  {% if rows %}
+  <div class="table-wrap cards"><table class="responsive">
+    <thead><tr><th>Data</th><th>Mecz</th><th class="num">Krok</th><th class="num">Stawka</th><th class="num">Kurs</th><th>Status</th><th class="num">Wynik</th><th></th></tr></thead>
+    <tbody>
+    {% for b in rows %}
+      <tr>
+        <td class="title" data-label="Mecz">{{ b.home }} – {{ b.away }}</td>
+        <td data-label="Data">{{ b.match_date|dpl }} · {{ BY_CODE[b.league].name if b.league in BY_CODE else b.league }}</td>
+        <td class="num" data-label="Krok">{{ b.step }}</td>
+        <td class="num" data-label="Stawka">{{ b.stake|zl }}</td>
+        <td class="num" data-label="Kurs">{{ b.odds|num }}</td>
+        <td data-label="Status">{% set m = {'pending': ('oczekuje','info'), 'won': ('wygrany','good'), 'lost': ('przegrany','bad'), 'void': ('zwrot','')} %}
+          <span class="badge {{ m[b.status][1] }}">{{ m[b.status][0] }}</span></td>
+        <td class="num {{ 'pos' if b.profit and b.profit > 0 else 'neg' }}" data-label="Wynik">{{ b.profit|zl(true) if b.profit is not none else '–' }}</td>
+        <td data-label="">
+          <form method="post" action="/zaklady/{{ b.id }}/status" class="actions" style="justify-content:flex-end">
+            {% if b.status == 'pending' %}
+              <button class="btn small" name="status" value="won">Wygrany</button>
+              <button class="btn small" name="status" value="lost">Przegrany</button>
+            {% else %}
+              <button class="btn small" name="status" value="pending">Cofnij</button>
+            {% endif %}
+            <button class="btn small danger" formaction="/zaklady/{{ b.id }}/usun" onclick="return confirm('Usunąć zakład?')">✕</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">Nie zapisano jeszcze żadnego zakładu.</p>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+{% if history %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script>
+const h = {{ history|tojson }};
+UBCharts.line('pnlChart', h.map(e => e[0]), [{ label: 'Saldo (zł)', data: h.map(e => e[1]), color: '#22c55e', fill: true }], ' zł', true);
+</script>
+{% endif %}
+{% endblock %}

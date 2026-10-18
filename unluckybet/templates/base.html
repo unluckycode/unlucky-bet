@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}Unlucky Bet{% endblock %} · Unlucky Bet</title>
+  <meta name="description" content="Obserwacja serii bez remisu i symulacja strategii martingale na remisy.">
+  <meta name="theme-color" content="#0b1120">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}" type="image/png">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Unlucky Bet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div class="offline-banner">Tryb offline – widzisz ostatnio pobrane dane.</div>
+<div class="app">
+  {% set ep = request.endpoint %}
+  <aside class="sidebar">
+    <a class="brand" href="/"><img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="">Unlucky Bet</a>
+    <nav class="nav">
+      <a href="/" class="{{ 'active' if ep == 'dashboard' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+        <span>Pulpit</span></a>
+      <a href="/ligi" class="{{ 'active' if ep in ('leagues', 'league') }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m12 7 4 3-1.5 4.5h-5L8 10z"/></svg>
+        <span>Ligi</span></a>
+      <a href="/backtest" class="{{ 'active' if ep == 'backtest' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg>
+        <span>Backtest</span></a>
+      <a href="/zaklady" class="{{ 'active' if ep == 'bets' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 5v12"/></svg>
+        <span>Zakłady</span></a>
+      <a href="/matematyka" class="{{ 'active' if ep == 'math_page' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 5H7l6 7-6 7h11"/></svg>
+        <span>Matematyka</span></a>
+      <a href="/ustawienia" class="nav-extra {{ 'active' if ep == 'settings' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        <span>Ustawienia</span></a>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="mobile-brand">
+      <img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="">Unlucky Bet
+      <span style="flex:1"></span>
+      <a href="/ustawienia" class="btn small" aria-label="Ustawienia">⚙</a>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="callout flash {{ 'good' if cat == 'ok' else 'bad' }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% if refreshing %}
+      <div class="callout info" id="refresh-banner"><span class="spinner"></span> Trwa pobieranie danych z football-data.co.uk… strona odświeży się sama.</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+    <p class="hint" style="margin-top:28px">
+      Dane: <a href="https://www.football-data.co.uk/" target="_blank" rel="noopener">football-data.co.uk</a>
+      {% if last_refresh %}· ostatnie odświeżenie {{ last_refresh }}{% endif %}
+      · Narzędzie analityczne – nie gwarantuje wygranych. Graj odpowiedzialnie, tylko u legalnych bukmacherów (18+).
+    </p>
+  </main>
+</div>
+<script>window.UB = { vapidKey: {{ vapid_public_key|tojson }}, pushEnabled: {{ push_enabled|tojson }}, refreshing: {{ refreshing|tojson }} };</script>
+<script src="{{ url_for('static', filename='app.js') }}?v=3"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
