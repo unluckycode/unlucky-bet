@@ -44,6 +44,7 @@ Lokalnie dane trafiają do SQLite (`data/unluckybet.db`). Inne polecenia:
 | `python -m unluckybet refresh --full` | pobierz wszystkie sezony od nowa |
 | `python -m unluckybet notify` | sprawdź alerty i wyślij powiadomienia push |
 | `python -m unluckybet vapid` | wygeneruj klucze do powiadomień push |
+| `pip install -r requirements-dev.txt && python -m pytest` | testy |
 | `python tools/make_icons.py` | odtwórz ikony aplikacji (wymaga `pip install pillow`) |
 
 ## Zmienne środowiskowe
@@ -128,6 +129,20 @@ i wysyła powiadomienia.
 Alternatywa: w repozytorium jest workflow `.github/workflows/cron-ping.yml` (co 30 min). Wystarczy dodać w GitHub →
 **Settings → Secrets and variables → Actions** sekrety `APP_URL` (adres z Render) i `CRON_TOKEN`. GitHub potrafi
 jednak opóźniać takie zadania, a co 30 min usługa zdąży usnąć – cron-job.org jest pewniejszy.
+
+### Logowanie nie działa – co sprawdzić
+
+1. **Render → unlucky-bet → Logs**. Po każdym starcie aplikacja wypisuje linię (bez ujawniania hasła), np.:
+   `INFO unluckybet.auth: [auth] APP_PASSWORD ustawione: 9 znaków (usunięto białe znaki z początku/końca); SECRET_KEY: z env; ciasteczko Secure: True`.
+   - `APP_PASSWORD nie jest ustawione` → zmienna nie dotarła do usługi (zła usługa, literówka w nazwie, niezapisane zmiany).
+   - Liczba znaków inna niż długość Twojego hasła → w wartości jest coś dodatkowego albo czegoś brakuje.
+2. Przy nieudanej próbie w logach pojawia się `Nieudane logowanie: wpisano N znaków, oczekiwano M` – porównaj N i M.
+3. **Po zmianie zmiennej** w **Environment** kliknij **Save Changes** (Render sam restartuje usługę) i poczekaj, aż w
+   **Events** pojawi się zakończone wdrożenie. Dopiero wtedy nowe hasło działa. Jeśli zmiana nie dotarła:
+   **Manual Deploy → Deploy latest commit**.
+4. Spacje i znaki nowej linii na początku/końcu oraz cudzysłowy wokół hasła są ignorowane; polskie litery są obsługiwane.
+5. Komunikat o **ciasteczku sesji** (a nie „Nieprawidłowe hasło”) oznacza, że przeglądarka blokuje ciasteczka albo strona
+   jest otwarta przez `http://` – użyj adresu `https://…onrender.com` i wyłącz blokowanie ciasteczek dla tej strony.
 
 ### Inne hostingi
 
