@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Ligi{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Ligi – badanie</h1>
+  <span class="meta">{{ rows|length }} lig · sortuj:
+    <a href="?sort=overlap">nakładanie</a> · <a href="?sort=streak">seria</a> · <a href="?sort=draws">remisy</a> · <a href="?sort=longest">rekord</a>
+  </span>
+</div>
+<div class="callout">
+  <strong>Jak czytać „mecze o tej samej godzinie”?</strong> Odsetek meczów z ostatnich 3 sezonów, które startowały
+  dokładnie o tej samej dacie i godzinie co inny mecz tej ligi (bez ostatniego tygodnia zakończonych sezonów, gdzie
+  zwykle gra się jednocześnie). Do strategii „po kolei” szukamy lig z wartością ≤ 15%
+  (<span class="badge good">pasuje</span>), 15–35% to <span class="badge warn">częściowo</span>.
+</div>
+<div class="card">
+  <div class="table-wrap cards">
+    <table class="responsive">
+      <thead><tr>
+        <th>Liga</th><th>Dopasowanie</th><th class="num">Ta sama godz.</th><th class="num">Seria bez remisu</th>
+        <th class="num">Remisy</th><th class="num">Rekord serii</th><th class="num">Śr. kurs X</th><th>Ostatni wynik</th><th>Następny mecz</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for s in rows %}
+        {% set st = strategies.get(s.code) %}
+        <tr class="{{ 'hl' if s.fit_tone == 'good' }}">
+          <td class="title" data-label="Liga"><a href="/liga/{{ s.code }}">{{ s.league.country }} – {{ s.league.name }}</a></td>
+          <td data-label="Dopasowanie"><span class="badge {{ s.fit_tone }}">{{ s.fit }}</span>{% if s.stale %} <span class="badge">przerwa / brak nowych danych</span>{% endif %}</td>
+          <td class="num" data-label="Ta sama godzina">{{ s.overlap_rate|pct(0) }}</td>
+          <td class="num" data-label="Seria bez remisu"><strong>{{ s.current_streak }}</strong></td>
+          <td class="num" data-label="Remisy (hist.)">{{ s.draw_rate|pct }}</td>
+          <td class="num" data-label="Rekord serii">{{ s.longest }}</td>
+          <td class="num" data-label="Śr. kurs na remis">{{ s.avg_draw_odds|num }}</td>
+          <td data-label="Ostatni wynik">{{ s.last_date|dpl }}</td>
+          <td data-label="Następny mecz">{% if s.next %}{{ s.next[0].date|dpl }} {{ s.next[0].time }} · {{ s.next[0].home }} – {{ s.next[0].away }}{% else %}<span class="muted">–</span>{% endif %}</td>
+          <td data-label="">
+            <form method="post" action="/liga/{{ s.code }}/obserwuj">
+              <input type="hidden" name="back" value="/ligi?sort={{ sort }}">
+              {% if st and st.watched %}<button class="btn small">✓ Obserwowana</button>
+              {% else %}<button class="btn small primary">+ Obserwuj</button>{% endif %}
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

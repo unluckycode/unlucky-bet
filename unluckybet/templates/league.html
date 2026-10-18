@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}{{ lg.name }}{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>{{ lg.name }} <small class="muted">· {{ lg.country }}</small></h1>
+  <form method="post" action="/liga/{{ lg.code }}/obserwuj">
+    {% if st and st.watched %}<button class="btn small">✓ Obserwowana – usuń</button>
+    {% else %}<button class="btn small primary">+ Obserwuj ligę</button>{% endif %}
+  </form>
+</div>
+
+{% if not s or not s.n %}
+  <div class="card">Brak danych dla tej ligi. Odśwież dane na pulpicie.</div>
+{% else %}
+<div class="grid kpis">
+  <div class="card kpi"><div class="label">Seria bez remisu</div><div class="value {{ 'pos' if s.current_streak >= params.threshold }}">{{ s.current_streak }}</div><div class="sub">do {{ s.last_date|dpl }}</div></div>
+  <div class="card kpi"><div class="label">Remisy historycznie</div><div class="value">{{ s.draw_rate|pct }}</div><div class="sub">{{ s.draws }} z {{ s.n }} meczów</div></div>
+  <div class="card kpi"><div class="label">Rekord serii</div><div class="value">{{ s.longest }}</div><div class="sub">{{ s.longest_span[0]|dpl }} – {{ s.longest_span[1]|dpl }}</div></div>
+  <div class="card kpi"><div class="label">Ta sama godzina</div><div class="value">{{ s.overlap_rate|pct(0) }}</div><div class="sub"><span class="badge {{ s.fit_tone }}">{{ s.fit }}</span> maks. {{ s.overlap.max_parallel if s.overlap else '–' }} naraz</div></div>
+</div>
+
+<div class="grid cols-2" style="margin-top:14px">
+  <section class="card">
+    <h2>Strategia</h2>
+    <form method="post" action="/liga/{{ lg.code }}/strategia" class="stack">
+      <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if st and st.active }}> Aktywna (śledź zakłady na żywo od daty startu)</label>
+      <div class="fields">
+        <label>Próg X (mecze bez remisu)<input type="number" name="threshold" min="1" max="40" value="{{ params.threshold }}"></label>
+        <label>Stawka bazowa (zł)<input type="number" name="base_stake" min="1" step="0.01" value="{{ params.base_stake }}"></label>
+        <label>Mnożnik po przegranej<input type="number" name="multiplier" min="1" step="0.01" value="{{ params.multiplier }}"></label>
+        <label>Maks. kroków (0 = bez limitu)<input type="number" name="max_steps" min="0" max="30" value="{{ params.max_steps }}"></label>
+        <label>Bankroll / limit kapitału (zł)<input type="number" name="bankroll" min="0" step="1" value="{{ params.bankroll|round(0)|int }}"></label>
+        <label>Kurs do symulacji
+          <select name="odds_mode">
+            {% for k, v in [('avg','Średni rynkowy'),('max','Najlepszy na rynku'),('b365','Bet365'),('fixed','Stały kurs')] %}
+              <option value="{{ k }}" {{ 'selected' if params.odds_mode == k }}>{{ v }}</option>
+            {% endfor %}
+          </select></label>
+        <label>Stały / zapasowy kurs<input type="number" name="fixed_odds" min="1.01" step="0.01" value="{{ params.fixed_odds }}"></label>
+        <label>Podatek od stawki (%)<input type="number" name="tax_pct" min="0" max="50" step="0.1" value="{{ (params.tax * 100)|round(1) }}"></label>
+        <label>Data startu<input type="date" name="start_date" value="{{ st.start_date if st else '' }}"></label>
+      </div>
+      <p class="hint">Kapitał na pełny cykl {{ params.max_steps or 10 }} kroków: <strong>{{ capital|zl }}</strong>.
+        Szansa na {{ params.max_steps or 10 }} porażek z rzędu przy p = {{ s.draw_rate|pct }}:
+        <strong>{{ ((1 - s.draw_rate) ** (params.max_steps or 10))|pct(2) }}</strong> na cykl.</p>
+      <label class="check"><input type="checkbox" name="restart" value="1"> Zacznij śledzenie od nowa (data startu = dziś lub podana)</label>
+      <div class="actions"><button class="btn primary">Zapisz</button>
+        <a class="btn" href="/backtest?league={{ lg.code }}">Backtest z tymi ustawieniami →</a></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Najbliższe mecze</h2>
+    {% if s.next %}
+      <div class="table-wrap"><table>
+        <tr><th>Data</th><th>Mecz</th><th class="num">Kurs X</th></tr>
+        {% for f in s.next %}
+          <tr><td>{{ f.date|dpl }} {{ f.time }}</td><td>{{ f.home }} – {{ f.away }}</td><td class="num">{{ f.odds_d_avg|num }}</td></tr>
+        {% endfor %}
+      </table></div>
+      <p class="hint">Mecze z datą w przeszłości mogły już się odbyć – wynik pojawi się po aktualizacji źródła.</p>
+    {% else %}
+      <p class="muted">Brak terminarza w źródle (przerwa w rozgrywkach lub koniec sezonu).</p>
+    {% endif %}
+    {% if live %}
+      {% set r = live.result %}
+      <h2 style="margin-top:18px">Śledzenie na żywo <span class="badge info">od {{ live.start|dpl }}</span></h2>
+      <div class="callout {{ 'good' if live.action.bet }}">
+        {% if live.action.bet %}<strong>Następny zakład: {{ live.action.stake|zl }} na remis (krok {{ live.action.step }})</strong><br>{% endif %}
+        {{ live.action.reason }}
+      </div>
+      <dl class="facts">
+        <div><dt>Wynik</dt><dd class="{{ 'pos' if r.state.pnl > 0 else ('neg' if r.state.pnl < 0) }}">{{ r.state.pnl|zl(true) }}</dd></div>
+        <div><dt>Strata w bieżącym cyklu</dt><dd>{{ r.state.cycle_loss|zl }}</dd></div>
+        <div><dt>Zakłady / cykle</dt><dd>{{ r.bets|length }} / {{ r.cycles|length }}</dd></div>
+        <div><dt>Postawiono łącznie</dt><dd>{{ r.total_staked|zl }}</dd></div>
+      </dl>
+      {% if r.bets %}
+      <div class="table-wrap"><table>
+        <tr><th>Data</th><th>Mecz</th><th class="num">Krok</th><th class="num">Stawka</th><th class="num">Kurs</th><th class="num">Wynik</th><th class="num">Saldo</th></tr>
+        {% for b in (r.bets|reverse|list)[:15] %}
+          <tr><td>{{ b.date|dpl }}</td><td>{{ b.home }} {{ b.score }} {{ b.away }}</td><td class="num">{{ b.step }}</td><td class="num">{{ b.stake|zl }}</td><td class="num">{{ b.odds|num }}</td>
+            <td class="num {{ 'pos' if b.won else 'neg' }}">{{ b.profit|zl(true) }}</td><td class="num">{{ b.pnl|zl(true) }}</td></tr>
+        {% endfor %}
+      </table></div>
+      {% if r.bets|length > 15 %}<p class="hint">Pokazano 15 ostatnich z {{ r.bets|length }} zakładów.</p>{% endif %}
+      {% endif %}
+    {% endif %}
+  </section>
+</div>
+
+<div class="grid cols-2" style="margin-top:14px">
+  <section class="card">
+    <h2>Ostatnie mecze</h2>
+    <div class="table-wrap"><table>
+      <tr><th>Data</th><th>Godz.</th><th>Mecz</th><th class="num">Wynik</th><th class="num">Seria</th></tr>
+      {% for m in recent %}
+        <tr class="{{ 'hl' if m.res == 'D' }}"><td>{{ m.date|dpl }}</td><td>{{ m.time or '–' }}</td><td>{{ m.home }} – {{ m.away }}</td>
+          <td class="num">{{ m.hg }}:{{ m.ag }}</td><td class="num">{{ m.streak }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </section>
+  <section class="card">
+    <h2>Czy seria „przyciąga” remis?</h2>
+    <p class="muted">P(remis | seria przed meczem ≥ X) w tej lidze vs. bazowy odsetek remisów {{ s.draw_rate|pct }}. Przedział 95% (Wilson).</p>
+    <div class="chart-box"><canvas id="condChart"></canvas></div>
+    <div class="table-wrap"><table>
+      <tr><th class="num">X</th><th class="num">Mecze</th><th class="num">Remisy</th><th class="num">P(remis)</th><th class="num">95% CI</th><th class="num">z</th></tr>
+      {% for c in cond %}
+        <tr><td class="num">≥ {{ c.x }}</td><td class="num">{{ c.n }}</td><td class="num">{{ c.draws }}</td><td class="num">{{ c.rate|pct }}</td>
+          <td class="num">{{ c.lo|pct }} – {{ c.hi|pct }}</td><td class="num">{{ c.z|num if c.z is not none else '–' }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </section>
+</div>
+
+<section class="card" style="margin-top:14px">
+  <h2>Długości serii bez remisu: obserwowane vs. model niezależny</h2>
+  <p class="muted">Gdyby mecze były niezależne z p = {{ s.draw_rate|pct }}, długości serii miałyby rozkład geometryczny (linia).</p>
+  <div class="chart-box"><canvas id="distChart"></canvas></div>
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if s and s.n %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script>
+const cond = {{ cond|tojson }};
+const dist = {{ dist|tojson }};
+UBCharts.line('condChart', cond.map(c => '≥' + c.x), [
+  { label: 'P(remis | seria ≥ X)', data: cond.map(c => +(c.rate * 100).toFixed(2)), color: '#22c55e' },
+  { label: 'Górna granica 95%', data: cond.map(c => +(c.hi * 100).toFixed(2)), color: 'rgba(34,197,94,.35)', dash: true },
+  { label: 'Dolna granica 95%', data: cond.map(c => +(c.lo * 100).toFixed(2)), color: 'rgba(34,197,94,.35)', dash: true },
+  { label: 'Bazowy odsetek', data: cond.map(c => +(c.expected * 100).toFixed(2)), color: '#f59e0b' },
+], '%');
+UBCharts.bars('distChart', dist.map(d => d.len === dist.length - 1 ? d.len + '+' : d.len), [
+  { label: 'Obserwowane serie', data: dist.map(d => d.observed), color: '#38bdf8', type: 'bar' },
+  { label: 'Oczekiwane (niezależność)', data: dist.map(d => +d.expected.toFixed(1)), color: '#f59e0b', type: 'line' },
+]);
+</script>
+{% endif %}
+{% endblock %}

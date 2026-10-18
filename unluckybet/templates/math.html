@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Matematyka{% endblock %}
+{% block content %}
+<div class="topbar"><h1>Matematyka strategii</h1></div>
+
+<section class="card" id="kalkulator">
+  <h2>Kalkulator martingale</h2>
+  <div class="fields wide">
+    <label>Stawka bazowa (zł)<input id="c-base" type="number" value="10" min="1" step="1"></label>
+    <label>Mnożnik<input id="c-mult" type="number" value="2" min="1" step="0.05"></label>
+    <label>Kurs na remis<input id="c-odds" type="number" value="3.4" min="1.01" step="0.01"></label>
+    <label>P(remis) %<input id="c-p" type="number" value="26.5" min="1" max="99" step="0.1"></label>
+    <label>Liczba kroków<input id="c-steps" type="number" value="8" min="1" max="25"></label>
+    <label>Podatek od stawki %<input id="c-tax" type="number" value="12" min="0" max="50" step="0.5"></label>
+  </div>
+  <div class="grid kpis" style="margin-top:12px">
+    <div class="card kpi"><div class="label">Kapitał na cykl</div><div class="value" id="k-cap">–</div></div>
+    <div class="card kpi"><div class="label">P(przegrania cyklu)</div><div class="value neg" id="k-ruin">–</div></div>
+    <div class="card kpi"><div class="label">EV na cykl</div><div class="value" id="k-ev">–</div><div class="sub" id="k-ev-sub"></div></div>
+    <div class="card kpi"><div class="label">Mnożnik „zwrot + 1 stawka”</div><div class="value" id="k-opt">–</div><div class="sub">m* = k′ / (k′ − 1), k′ = kurs·(1 − podatek)</div></div>
+  </div>
+  <div class="table-wrap" style="margin-top:12px"><table id="c-table"></table></div>
+</section>
+
+<section class="card" style="margin-top:14px">
+  <h2>Sprawdzenie na danych: czy po serii bez remisu remis jest bardziej prawdopodobny?</h2>
+  <p class="muted">Wszystkie {{ indep[0].n if indep }} meczów ze wszystkich lig. „Oczekiwane” = średnia bazowych odsetków remisów lig, ważona liczbą meczów w danej grupie. z &gt; 1,96 oznacza różnicę istotną na poziomie 5% (dla jednego testu – tu testujemy 12 progów naraz).</p>
+  <div class="chart-box"><canvas id="indepChart"></canvas></div>
+  <div class="table-wrap"><table>
+    <tr><th class="num">Seria ≥ X</th><th class="num">Mecze</th><th class="num">Remisy</th><th class="num">P(remis)</th><th class="num">Oczekiwane</th><th class="num">Różnica</th><th class="num">95% CI</th><th class="num">z</th></tr>
+    {% for r in indep %}
+      <tr><td class="num">{{ r.x }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.draws }}</td><td class="num">{{ r.rate|pct(2) }}</td><td class="num">{{ r.expected|pct(2) }}</td>
+        <td class="num">{{ ((r.rate - r.expected) * 100)|num(2) }} pp</td><td class="num">{{ r.lo|pct(1) }} – {{ r.hi|pct(1) }}</td><td class="num">{{ r.z|num(2) if r.z is not none else '–' }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% if indep_fit %}
+  <h3 style="margin-top:16px">Tylko ligi „po kolei” ({{ fit_names }})</h3>
+  <div class="table-wrap"><table>
+    <tr><th class="num">Seria ≥ X</th><th class="num">Mecze</th><th class="num">P(remis)</th><th class="num">Oczekiwane</th><th class="num">95% CI</th><th class="num">z</th></tr>
+    {% for r in indep_fit %}
+      <tr><td class="num">{{ r.x }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.rate|pct(2) }}</td><td class="num">{{ r.expected|pct(2) }}</td>
+        <td class="num">{{ r.lo|pct(1) }} – {{ r.hi|pct(1) }}</td><td class="num">{{ r.z|num(2) if r.z is not none else '–' }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+</section>
+
+<article class="card prose" style="margin-top:14px">
+  {{ content|safe }}
+</article>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script>
+const ind = {{ indep|tojson }};
+UBCharts.line('indepChart', ind.map(r => '≥' + r.x), [
+  { label: 'P(remis | seria ≥ X)', data: ind.map(r => +(r.rate * 100).toFixed(2)), color: '#22c55e' },
+  { label: 'Górna granica 95%', data: ind.map(r => +(r.hi * 100).toFixed(2)), color: 'rgba(34,197,94,.35)', dash: true },
+  { label: 'Dolna granica 95%', data: ind.map(r => +(r.lo * 100).toFixed(2)), color: 'rgba(34,197,94,.35)', dash: true },
+  { label: 'Oczekiwane przy niezależności', data: ind.map(r => +(r.expected * 100).toFixed(2)), color: '#f59e0b' },
+], '%');
+UBCalc.init();
+</script>
+{% endblock %}
