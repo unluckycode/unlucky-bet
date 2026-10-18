@@ -1,27 +1,36 @@
 import hashlib
 import hmac
+import logging
 import os
+import secrets
 from datetime import date, timedelta
 from pathlib import Path
 
 import markdown
 from flask import (Flask, abort, flash, jsonify, redirect, render_template, request, send_from_directory,
                    session, url_for)
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import analysis, db, notify, services, strategy
+from . import analysis, auth, db, notify, services, strategy
 from .leagues import BY_CODE, LEAGUES
 
+log = logging.getLogger("unluckybet.auth")
+
 ROOT = Path(__file__).resolve().parent.parent
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
-CRON_TOKEN = os.environ.get("CRON_TOKEN", "")
+CRON_TOKEN = os.environ.get("CRON_TOKEN", "").strip()
+ON_RENDER = bool(os.environ.get("RENDER"))
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
-    f"unlucky-bet::{APP_PASSWORD or 'local-dev'}".encode()).hexdigest()
+# Render (i inne hostingi) terminują HTTPS na proxy – bez tego Flask widzi żądania jako http.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.secret_key = os.environ.get("SECRET_KEY", "").strip() or hashlib.sha256(
+    f"unlucky-bet::{auth.configured_password() or 'local-dev'}".encode()).hexdigest()
 app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=60),
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "1" if APP_PASSWORD else "0") == "1",
+    SESSION_COOKIE_HTTPONLY=True,
+    # Ciasteczko Secure tylko na HTTPS (Render); lokalnie po http zostałoby odrzucone przez przeglądarkę.
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "1" if ON_RENDER else "0") == "1",
 )
 
 PUBLIC_ENDPOINTS = {"login", "static", "manifest", "service_worker", "offline", "healthz", "cron"}
@@ -72,7 +81,7 @@ def inject():
         "refreshing": services.refresh_running(),
         "push_enabled": notify.enabled(),
         "vapid_public_key": notify.VAPID_PUBLIC_KEY,
-        "auth_enabled": bool(APP_PASSWORD),
+        "auth_enabled": auth.enabled(),
         "BY_CODE": BY_CODE,
     }
 
@@ -81,7 +90,7 @@ def inject():
 
 @app.before_request
 def require_login():
-    if not APP_PASSWORD or request.endpoint in PUBLIC_ENDPOINTS:
+    if not auth.enabled() or request.endpoint in PUBLIC_ENDPOINTS:
         return None
     if session.get("auth") == _auth_token():
         return None
@@ -91,20 +100,53 @@ def require_login():
 
 
 def _auth_token():
-    return hmac.new(app.secret_key.encode(), APP_PASSWORD.encode(), "sha256").hexdigest()
+    return hmac.new(app.secret_key.encode(), auth.configured_password().encode("utf-8"), "sha256").hexdigest()
+
+
+LOGIN_ERRORS = {
+    "not_configured": ("Logowanie nie jest skonfigurowane: na serwerze brak zmiennej APP_PASSWORD. "
+                       "Ustaw ją w Render → Environment i poczekaj na restart usługi.", 503),
+    "no_session": ("Przeglądarka nie odesłała ciasteczka sesji, więc hasła nie sprawdzono. Odśwież stronę "
+                   "i spróbuj ponownie. Jeśli to się powtarza: otwórz adres https://, wyłącz blokowanie "
+                   "ciasteczek dla tej strony lub tryb prywatny.", 400),
+    "csrf": ("Formularz logowania wygasł (np. po restarcie serwera). Odśwież stronę i spróbuj ponownie.", 400),
+    "wrong_password": ("Nieprawidłowe hasło.", 401),
+}
+
+
+def _login_form(error_code=None):
+    if not session.get("csrf"):
+        session["csrf"] = secrets.token_urlsafe(24)
+    message, status = LOGIN_ERRORS[error_code] if error_code else (None, 200)
+    return render_template("login.html", error=message, error_code=error_code, csrf=session["csrf"],
+                           configured=auth.enabled()), status
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    error = None
-    if request.method == "POST":
-        if APP_PASSWORD and hmac.compare_digest(request.form.get("password", ""), APP_PASSWORD):
-            session.permanent = True
-            session["auth"] = _auth_token()
-            nxt = request.args.get("next") or "/"
-            return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else "/")
-        error = "Nieprawidłowe hasło."
-    return render_template("login.html", error=error)
+    if request.method == "GET":
+        return _login_form()
+    if not auth.enabled():
+        log.warning("[auth] Próba logowania, ale APP_PASSWORD nie jest ustawione")
+        return _login_form("not_configured")
+    expected_csrf = session.get("csrf")
+    if not expected_csrf:
+        log.warning("[auth] Logowanie bez ciasteczka sesji (scheme=%s, secure_cookie=%s)",
+                    request.scheme, app.config["SESSION_COOKIE_SECURE"])
+        return _login_form("no_session")
+    if not hmac.compare_digest(request.form.get("csrf", "").encode(), expected_csrf.encode()):
+        log.warning("[auth] Nieprawidłowy token formularza logowania")
+        return _login_form("csrf")
+    if not auth.check_password(request.form.get("password", "")):
+        log.warning("[auth] Nieudane logowanie: wpisano %d znaków, oczekiwano %d",
+                    len(auth.normalize_input(request.form.get("password", ""))), len(auth.configured_password()))
+        return _login_form("wrong_password")
+    session.clear()
+    session.permanent = True
+    session["auth"] = _auth_token()
+    log.info("[auth] Zalogowano pomyślnie")
+    nxt = request.args.get("next") or "/"
+    return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else "/")
 
 
 @app.route("/logout")
@@ -414,6 +456,9 @@ def not_found(_):
 
 
 def create_app():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    log.info("[auth] %s; SECRET_KEY: %s; ciasteczko Secure: %s", auth.describe_secret(os.environ.get("APP_PASSWORD")),
+             "z env" if os.environ.get("SECRET_KEY", "").strip() else "wyliczony", app.config["SESSION_COOKIE_SECURE"])
     db.init_db()
     if os.environ.get("DISABLE_SCHEDULER") != "1":
         services.start_background_scheduler()
