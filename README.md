@@ -12,6 +12,7 @@ Portal (PWA) do obserwacji lig piłkarskich, w których mecze grane są po kolei
 - **Ligi – badanie:** **168 lig świata** z [FotMob](https://www.fotmob.com/) (wyniki minutowe, bez klucza). 27 lig z meczami „po kolei” (≤10% nakładania godzin) jest domyślnie na pulpicie. Kursy i długa historia: [football-data.co.uk](https://www.football-data.co.uk/).
   Dla każdej ligi: odsetek meczów granych o tej samej godzinie (czy liga jest „po kolei”), bieżąca seria bez remisu,
   historyczny odsetek remisów, najdłuższa seria, średni kurs na remis, następny mecz.
+- **Pulpity rynków:** Remisy · Over/Under 2.5 · BTTS – osobne strategie per liga×rynek, rekomendacje lig z serią ≥ X.
 - **Pulpit:** obserwowane ligi, pasek postępu serii do progu X, alerty, sugerowana stawka i następny mecz.
 - **Strategia dla ligi:** próg X, stawka bazowa, mnożnik, limit kroków, bankroll, rodzaj kursu, podatek od stawki (12%),
   aktywna/nieaktywna. Aktywna strategia jest śledzona „na żywo” od daty startu na prawdziwych wynikach

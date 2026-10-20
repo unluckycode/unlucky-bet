@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS fixtures (
 );
 
 CREATE TABLE IF NOT EXISTS strategies (
-    league TEXT PRIMARY KEY,
+    league TEXT NOT NULL,
+    market TEXT NOT NULL DEFAULT 'draw',
+    side TEXT NOT NULL DEFAULT '',
     watched INTEGER NOT NULL DEFAULT 1,
     active INTEGER NOT NULL DEFAULT 0,
     threshold INTEGER NOT NULL DEFAULT 5,
@@ -60,12 +62,14 @@ CREATE TABLE IF NOT EXISTS strategies (
     odds_mode TEXT NOT NULL DEFAULT 'avg',
     fixed_odds REAL NOT NULL DEFAULT 3.2,
     tax REAL NOT NULL DEFAULT 0.12,
-    start_date TEXT NOT NULL DEFAULT ''
+    start_date TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (league, market)
 );
 
 CREATE TABLE IF NOT EXISTS bets (
     id {_ID},
     league TEXT NOT NULL,
+    market TEXT NOT NULL DEFAULT 'draw',
     match_date TEXT NOT NULL,
     home TEXT NOT NULL,
     away TEXT NOT NULL,
@@ -171,6 +175,9 @@ MIGRATIONS = [
     ("fixtures", "kickoff_utc", "TEXT NOT NULL DEFAULT ''"),
     ("fixtures", "event_id", "TEXT NOT NULL DEFAULT ''"),
     ("fixtures", "status", "TEXT NOT NULL DEFAULT 'upcoming'"),
+    ("strategies", "market", "TEXT NOT NULL DEFAULT 'draw'"),
+    ("strategies", "side", "TEXT NOT NULL DEFAULT ''"),
+    ("bets", "market", "TEXT NOT NULL DEFAULT 'draw'"),
 ]
 
 
@@ -190,6 +197,69 @@ def init_db():
     # Indeks po migracji kolumn (CREATE TABLE IF NOT EXISTS nie dodaje ich do starej tabeli).
     with session() as conn:
         conn.execute("CREATE INDEX IF NOT EXISTS ix_matches_kickoff ON matches(league, kickoff_utc)")
+    _migrate_strategies_pk()
+
+
+def _migrate_strategies_pk():
+    """Stare bazy miały PRIMARY KEY(league) – przebuduj na (league, market)."""
+    conn = connect()
+    try:
+        if IS_PG:
+            row = conn.execute(
+                "SELECT constraint_name FROM information_schema.table_constraints "
+                "WHERE table_name='strategies' AND constraint_type='PRIMARY KEY'"
+            ).fetchone()
+            # Jeśli PK to tylko league – przebuduj
+            cols = conn.execute(
+                "SELECT a.attname FROM pg_index i "
+                "JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=ANY(i.indkey) "
+                "WHERE i.indrelid='strategies'::regclass AND i.indisprimary"
+            ).fetchall()
+            names = [c["attname"] for c in cols] if cols else []
+            if names == ["league"]:
+                conn.execute("ALTER TABLE strategies DROP CONSTRAINT strategies_pkey")
+                conn.execute("ALTER TABLE strategies ADD PRIMARY KEY (league, market)")
+                conn.commit()
+        else:
+            # SQLite: sprawdź sql tabeli
+            row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='strategies'").fetchone()
+            sql = (row["sql"] or "") if row else ""
+            if sql and "PRIMARY KEY (league, market)" not in sql and "PRIMARY KEY(league, market)" not in sql:
+                conn.executescript("""
+                CREATE TABLE IF NOT EXISTS strategies_new (
+                    league TEXT NOT NULL,
+                    market TEXT NOT NULL DEFAULT 'draw',
+                    side TEXT NOT NULL DEFAULT '',
+                    watched INTEGER NOT NULL DEFAULT 1,
+                    active INTEGER NOT NULL DEFAULT 0,
+                    threshold INTEGER NOT NULL DEFAULT 5,
+                    base_stake REAL NOT NULL DEFAULT 10,
+                    multiplier REAL NOT NULL DEFAULT 2,
+                    max_steps INTEGER NOT NULL DEFAULT 8,
+                    bankroll REAL NOT NULL DEFAULT 0,
+                    odds_mode TEXT NOT NULL DEFAULT 'avg',
+                    fixed_odds REAL NOT NULL DEFAULT 3.2,
+                    tax REAL NOT NULL DEFAULT 0.12,
+                    start_date TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (league, market)
+                );
+                INSERT OR IGNORE INTO strategies_new
+                    (league, market, side, watched, active, threshold, base_stake, multiplier,
+                     max_steps, bankroll, odds_mode, fixed_odds, tax, start_date)
+                SELECT league, COALESCE(market,'draw'), COALESCE(side,''), watched, active, threshold,
+                       base_stake, multiplier, max_steps, bankroll, odds_mode, fixed_odds, tax, start_date
+                FROM strategies;
+                DROP TABLE strategies;
+                ALTER TABLE strategies_new RENAME TO strategies;
+                """)
+                conn.commit()
+    except Exception:  # noqa: BLE001
+        try:
+            conn.raw.rollback()
+        except Exception:
+            pass
+    finally:
+        conn.close()
 
 
 def get_meta(key, default=None):

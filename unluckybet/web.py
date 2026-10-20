@@ -13,6 +13,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import analysis, auth, db, live, notify, services, strategy
 from .leagues import BY_CODE, LEAGUES
+from .markets import MARKET_ORDER, MARKETS, get_market
 
 log = logging.getLogger("unluckybet.auth")
 
@@ -105,6 +106,9 @@ def inject():
         "vapid_public_key": notify.VAPID_PUBLIC_KEY,
         "auth_enabled": auth.enabled(),
         "BY_CODE": BY_CODE,
+        "MARKETS": MARKETS,
+        "MARKET_ORDER": MARKET_ORDER,
+        "current_market": getattr(request, "market_key", "draw"),
     }
 
 
@@ -185,93 +189,145 @@ def _league_or_404(code):
     return BY_CODE[code]
 
 
-def _strategy_form(form):
+def _strategy_form(form, market="draw"):
+    mk = get_market(market)
     def f(name, cast, default):
         try:
             return cast(form.get(name, default))
         except (TypeError, ValueError):
             return default
 
+    side = mk.normalize_side(form.get("side"))
     values = {
-        "threshold": max(1, f("threshold", int, 5)),
+        "threshold": max(1, f("threshold", int, mk.default_threshold)),
         "base_stake": max(0.01, f("base_stake", float, 10.0)),
         "multiplier": max(1.0, f("multiplier", float, 2.0)),
         "max_steps": max(0, f("max_steps", int, 8)),
         "bankroll": max(0.0, f("bankroll", float, 0.0)),
-        "odds_mode": form.get("odds_mode") if form.get("odds_mode") in ("avg", "max", "b365", "fixed") else "avg",
-        "fixed_odds": max(1.01, f("fixed_odds", float, 3.2)),
+        "odds_mode": form.get("odds_mode") if form.get("odds_mode") in ("avg", "max", "b365", "fixed") else (
+            "avg" if mk.odds_keys else "fixed"),
+        "fixed_odds": max(1.01, f("fixed_odds", float, mk.default_odds)),
         "tax": min(0.5, max(0.0, f("tax_pct", float, 12.0) / 100)) if "tax_pct" in form else float(form.get("tax", 0.12)),
+        "side": side,
+        "market": mk.key,
     }
     return values
 
 
-def _card(code, st):
-    s = analysis.summary(code)
+def _card(code, st, market="draw"):
+    mk = get_market(market)
+    side = st.get("side") or mk.default_side
+    s = analysis.summary(code, mk.key, side)
     if not s or not s.get("n"):
         return None
     p = strategy.Params.from_row(st)
-    live = services.live_state(st) if st["active"] else None
-    if live:
-        action = live["action"]
+    live_st = services.live_state(st) if st["active"] else None
+    if live_st:
+        action = live_st["action"]
     else:
         action = strategy.next_action(strategy.Result(state=strategy.State(streak=s["current_streak"])), p)
-    alert = s["current_streak"] >= p.threshold or (live and live["result"].state.in_cycle)
-    return {"s": s, "st": st, "p": p, "live": live, "action": action, "alert": alert,
-            "progress": min(1.0, s["current_streak"] / max(1, p.threshold))}
+    alert = s["current_streak"] >= p.threshold or (live_st and live_st["result"].state.in_cycle)
+    return {"s": s, "st": st, "p": p, "live": live_st, "action": action, "alert": alert,
+            "progress": min(1.0, s["current_streak"] / max(1, p.threshold)), "market": mk}
 
 
 # ---------- widoki ----------
 
+def _market_or_404(key):
+    if key not in MARKETS:
+        abort(404)
+    request.market_key = key
+    return MARKETS[key]
+
+
 @app.route("/")
 def dashboard():
+    return redirect(url_for("market_dashboard", market="draw"))
+
+
+@app.route("/rynek/<market>")
+def market_dashboard(market):
+    mk = _market_or_404(market)
     if not services.has_data():
         services.refresh_async()
         return render_template("loading.html")
-    strategies = services.all_strategies()
-    cards = [c for c in (_card(code, st) for code, st in strategies.items() if st["watched"]) if c]
+    services.ensure_default_watches()
+    strategies = services.all_strategies(mk.key)
+    # strona strategii (nadpisuje side z formularza globalnego? używamy side z wiersza)
+    cards = []
+    for code, st in strategies.items():
+        if not st.get("watched"):
+            continue
+        c = _card(code, st, mk.key)
+        if c:
+            cards.append(c)
     cards.sort(key=lambda c: (not c["alert"], -c["progress"], c["s"]["overlap_rate"] or 1))
     alerts = [c for c in cards if c["alert"]]
-    suggestions = [s for s in analysis.all_summaries()
+    # rekomendacje: globalny próg z pierwszego watched lub default
+    thr = next((st["threshold"] for st in strategies.values() if st.get("watched")), mk.default_threshold)
+    side = next((st.get("side") for st in strategies.values() if st.get("watched")), mk.default_side)
+    recs = analysis.recommendations(mk.key, side, threshold=thr, limit=8)
+    suggestions = [s for s in analysis.all_summaries(mk.key, side)
                    if s["fit_tone"] == "good" and s["code"] not in strategies][:4]
     with db.session() as conn:
-        pending = conn.execute("SELECT COUNT(*) AS n FROM bets WHERE status='pending'").fetchone()["n"]
-    return render_template("dashboard.html", cards=cards, alerts=alerts, suggestions=suggestions, pending=pending)
+        pending = conn.execute(
+            "SELECT COUNT(*) AS n FROM bets WHERE status='pending' AND COALESCE(market,'draw')=?",
+            (mk.key,)).fetchone()["n"]
+    return render_template(
+        "dashboard.html", market=mk, cards=cards, alerts=alerts, suggestions=suggestions,
+        pending=pending, recommendations=recs, threshold=thr, side=side,
+    )
 
 
 @app.route("/ligi")
 def leagues():
+    market = request.args.get("market") or "draw"
+    mk = get_market(market)
+    request.market_key = mk.key
     sort = request.args.get("sort", "overlap")
     fit = request.args.get("fit", "pasuje")
+    side = request.args.get("side") or mk.default_side
     keys = {
         "overlap": lambda s: s["overlap_rate"] if s["overlap_rate"] is not None else 9,
         "streak": lambda s: -s.get("current_streak", 0),
-        "draws": lambda s: -(s.get("draw_rate") or 0),
+        "draws": lambda s: -(s.get("hit_rate") or s.get("draw_rate") or 0),
         "longest": lambda s: -s.get("longest", 0),
     }
-    rows = analysis.all_summaries()
+    rows = analysis.all_summaries(mk.key, side)
     n_fit = sum(1 for s in rows if s.get("fit_tone") == "good")
     if fit == "pasuje":
         rows = [s for s in rows if s.get("fit_tone") == "good"]
     elif fit == "częściowo":
         rows = [s for s in rows if s.get("fit_tone") == "warn"]
     rows = sorted(rows, key=keys.get(sort, keys["overlap"]))
-    return render_template("leagues.html", rows=rows, sort=sort, fit=fit, n_fit=n_fit,
-                           strategies=services.all_strategies())
+    return render_template("leagues.html", rows=rows, sort=sort, fit=fit, n_fit=n_fit, market=mk, side=side,
+                           strategies=services.all_strategies(mk.key))
 
 
 @app.route("/liga/<code>")
-def league(code):
+def league_legacy(code):
+    return redirect(url_for("market_league", market=request.args.get("market") or "draw", code=code))
+
+
+@app.route("/rynek/<market>/liga/<code>")
+def market_league(market, code):
+    mk = _market_or_404(market)
     lg = _league_or_404(code)
-    s = analysis.summary(code)
+    st = services.get_strategy(code, mk.key)
+    side = (st or {}).get("side") or mk.default_side
+    s = analysis.summary(code, mk.key, side)
     rows = analysis.matches(code)
-    st = services.get_strategy(code)
-    params = strategy.Params.from_row(st) if st else strategy.Params(**{
-        k: services.DEFAULT_STRATEGY[k] for k in ("threshold", "base_stake", "multiplier", "max_steps",
-                                                   "bankroll", "odds_mode", "fixed_odds", "tax")})
-    live = services.live_state(st) if st and st["active"] else None
-    recent = list(reversed(analysis.with_streaks(rows[-400:])[-30:]))
+    if st:
+        params = strategy.Params.from_row(st)
+    else:
+        d = services.default_for(mk.key)
+        params = strategy.Params(**{k: d[k] for k in (
+            "threshold", "base_stake", "multiplier", "max_steps", "bankroll", "odds_mode", "fixed_odds", "tax",
+            "market", "side")})
+    live_st = services.live_state(st) if st and st["active"] else None
+    recent = list(reversed(analysis.with_streaks(rows[-400:], mk.key, side)[-30:]))
     return render_template(
-        "league.html", lg=lg, s=s, st=st, params=params, live=live,
+        "league.html", lg=lg, s=s, st=st, params=params, live=live_st, market=mk, side=side,
         recent=recent,
         cond=analysis.league_conditional(code),
         dist=analysis.run_length_distribution(rows),
@@ -279,54 +335,74 @@ def league(code):
     )
 
 
-@app.route("/liga/<code>/strategia", methods=["POST"])
-def save_strategy(code):
+@app.route("/rynek/<market>/liga/<code>/strategia", methods=["POST"])
+def save_strategy(market, code):
+    mk = _market_or_404(market)
     _league_or_404(code)
-    values = _strategy_form(request.form)
+    values = _strategy_form(request.form, mk.key)
     values["watched"] = 1
-    old = services.get_strategy(code)
+    old = services.get_strategy(code, mk.key)
     active = 1 if request.form.get("active") else 0
     values["active"] = active
     if active and (not old or not old["active"] or request.form.get("restart")):
         values["start_date"] = request.form.get("start_date") or date.today().isoformat()
     elif request.form.get("start_date"):
         values["start_date"] = request.form["start_date"]
-    services.save_strategy(code, values)
+    services.save_strategy(code, values, mk.key)
     flash("Zapisano ustawienia strategii.", "ok")
-    return redirect(url_for("league", code=code))
+    return redirect(url_for("market_league", market=mk.key, code=code))
+
+
+@app.route("/rynek/<market>/liga/<code>/obserwuj", methods=["POST"])
+def toggle_watch(market, code):
+    mk = _market_or_404(market)
+    _league_or_404(code)
+    st = services.get_strategy(code, mk.key)
+    if st and st["watched"]:
+        services.save_strategy(code, {"watched": 0, "active": 0}, mk.key)
+        flash(f"Usunięto {BY_CODE[code].name} z obserwowanych ({mk.name}).", "ok")
+    else:
+        services.save_strategy(code, {"watched": 1}, mk.key)
+        flash(f"Dodano {BY_CODE[code].name} do obserwowanych ({mk.name}).", "ok")
+    return redirect(request.form.get("back") or url_for("market_league", market=mk.key, code=code))
+
+
+@app.route("/liga/<code>/strategia", methods=["POST"])
+def save_strategy_legacy(code):
+    return save_strategy(request.form.get("market") or "draw", code)
 
 
 @app.route("/liga/<code>/obserwuj", methods=["POST"])
-def toggle_watch(code):
-    _league_or_404(code)
-    st = services.get_strategy(code)
-    if st and st["watched"]:
-        services.save_strategy(code, {"watched": 0, "active": 0})
-        flash(f"Usunięto {BY_CODE[code].name} z obserwowanych.", "ok")
-    else:
-        services.save_strategy(code, {"watched": 1})
-        flash(f"Dodano {BY_CODE[code].name} do obserwowanych.", "ok")
-    return redirect(request.form.get("back") or url_for("league", code=code))
+def toggle_watch_legacy(code):
+    return toggle_watch(request.form.get("market") or "draw", code)
 
 
 @app.route("/backtest")
 def backtest():
+    market = request.args.get("market") or "draw"
+    mk = get_market(market)
+    request.market_key = mk.key
     code = request.args.get("league") or "POL"
     _league_or_404(code)
-    st = services.get_strategy(code)
-    base = st or services.DEFAULT_STRATEGY
-    params = strategy.Params(**_strategy_form(request.args if "threshold" in request.args else base))
-    hist = analysis.matches_history(code)
+    st = services.get_strategy(code, mk.key)
+    base = st or services.default_for(mk.key)
+    form = request.args if "threshold" in request.args else base
+    params_dict = _strategy_form(form, mk.key)
+    params = strategy.Params(**params_dict)
+    # Historia: dla OU/BTTS wystarczą wyniki FotMob (gole); dla remisu dokładamy FD pod kursy
+    hist = analysis.matches(code) if mk.key != "draw" else analysis.matches_history(code)
     seasons = sorted({m["season"] for m in hist if m.get("season")})
     since = request.args.get("since") or (seasons[0] if seasons else "")
     rows = [m for m in hist if (m.get("season") or "") >= since]
     result = strategy.run(rows, params)
     sweep = strategy.sweep(rows, params)
     link_args = {k: v for k, v in params.__dict__.items() if k != "threshold"}
-    link_args.update(league=code, since=since)
-    return render_template("backtest.html", code=code, params=params, result=result, sweep=sweep, link_args=link_args,
-                           seasons=seasons, since=since, rows=rows,
-                           summaries=analysis.all_summaries(), capital=strategy.capital_needed(params))
+    link_args.update(league=code, since=since, market=mk.key)
+    return render_template(
+        "backtest.html", code=code, params=params, result=result, sweep=sweep, link_args=link_args,
+        seasons=seasons, since=since, rows=rows, market=mk,
+        summaries=analysis.all_summaries(mk.key, params.side), capital=strategy.capital_needed(params),
+    )
 
 
 @app.route("/zaklady", methods=["GET", "POST"])
@@ -341,9 +417,9 @@ def bets():
             return redirect(url_for("bets"))
         with db.session() as conn:
             conn.execute(
-                "INSERT INTO bets(league, match_date, home, away, stake, odds, tax, step, status, note, created_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (f["league"], f["match_date"], f["home"].strip(), f["away"].strip(), stake, odds, tax,
+                "INSERT INTO bets(league, market, match_date, home, away, stake, odds, tax, step, status, note, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (f["league"], f.get("market") or "draw", f["match_date"], f["home"].strip(), f["away"].strip(), stake, odds, tax,
                  int(f.get("step") or 1), "pending", f.get("note", "").strip(), date.today().isoformat()))
         flash("Dodano zakład. Zostanie rozliczony automatycznie po pojawieniu się wyniku.", "ok")
         return redirect(url_for("bets"))
@@ -361,7 +437,7 @@ def bets():
             pnl += b["profit"]
             staked += b["stake"]
             history.append((b["match_date"], round(pnl, 2)))
-    prefill = {k: request.args.get(k, "") for k in ("league", "match_date", "home", "away", "stake", "odds", "step", "tax_pct")}
+    prefill = {k: request.args.get(k, "") for k in ("league", "market", "match_date", "home", "away", "stake", "odds", "step", "tax_pct")}
     return render_template("bets.html", rows=rows, pnl=pnl, staked=staked, history=history, prefill=prefill,
                            pending=sum(1 for b in rows if b["status"] == "pending"), leagues=LEAGUES)
 
@@ -493,6 +569,7 @@ def create_app():
     log.info("[auth] %s; SECRET_KEY: %s; ciasteczko Secure: %s", auth.describe_secret(os.environ.get("APP_PASSWORD")),
              "z env" if os.environ.get("SECRET_KEY", "").strip() else "wyliczony", app.config["SESSION_COOKIE_SECURE"])
     db.init_db()
+    services.ensure_default_watches()
     if os.environ.get("DISABLE_SCHEDULER") != "1":
         services.start_background_scheduler()
     return app

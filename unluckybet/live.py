@@ -174,16 +174,6 @@ def live_refresh_due():
 
 
 def ensure_default_watches():
-    """Dodaje 27 pasujących lig do obserwowanych, jeśli użytkownik nie ma żadnej strategii."""
-    with db.session() as conn:
-        n = conn.execute("SELECT COUNT(*) AS n FROM strategies").fetchone()["n"]
-        if n:
-            return 0
-        for lg in FITTING:
-            conn.execute(
-                "INSERT INTO strategies(league, watched, active, threshold, base_stake, multiplier, "
-                "max_steps, bankroll, odds_mode, fixed_odds, tax, start_date) "
-                "VALUES(?,?,0,5,10,2,8,0,'avg',3.2,0.12,'') ON CONFLICT DO NOTHING",
-                (lg.code, 1),
-            )
-        return len(FITTING)
+    """Delegacja do services – wiersze strategii per liga × rynek."""
+    from . import services
+    return services.ensure_default_watches()

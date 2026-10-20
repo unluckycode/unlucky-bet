@@ -8,54 +8,82 @@ from datetime import date, datetime
 
 from . import analysis, db, ingest, live, strategy
 from .leagues import FITTING
+from .markets import MARKET_ORDER, get_market
 
 log = logging.getLogger(__name__)
 
-REFRESH_INTERVAL_MIN = int(os.environ.get("REFRESH_INTERVAL_MIN", "360"))  # football-data rzadziej
+REFRESH_INTERVAL_MIN = int(os.environ.get("REFRESH_INTERVAL_MIN", "360"))
 LIVE_REFRESH_MIN = live.LIVE_REFRESH_MIN
 
 DEFAULT_STRATEGY = {
     "watched": 1, "active": 0, "threshold": 5, "base_stake": 10.0, "multiplier": 2.0,
-    "max_steps": 8, "bankroll": 0.0, "odds_mode": "avg", "fixed_odds": 3.2, "tax": 0.12, "start_date": "",
+    "max_steps": 8, "bankroll": 0.0, "odds_mode": "avg", "fixed_odds": 3.2, "tax": 0.12,
+    "start_date": "", "side": "",
 }
 
 _refresh_lock = threading.Lock()
 _refresh_state = {"running": False, "started": None, "log": [], "kind": ""}
 
 
-def get_strategy(code):
+def default_for(market):
+    mk = get_market(market)
+    return {
+        **DEFAULT_STRATEGY,
+        "market": mk.key,
+        "side": mk.default_side,
+        "threshold": mk.default_threshold,
+        "fixed_odds": mk.default_odds,
+        "odds_mode": "avg" if mk.odds_keys else "fixed",
+    }
+
+
+def get_strategy(code, market="draw"):
+    mk = get_market(market)
     with db.session() as conn:
-        row = conn.execute("SELECT * FROM strategies WHERE league=?", (code,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM strategies WHERE league=? AND market=?", (code, mk.key)
+        ).fetchone()
     return dict(row) if row else None
 
 
-def all_strategies():
+def all_strategies(market=None):
+    """Gdy market podany – dict[league]=row; inaczej dict[(league,market)]=row."""
     with db.session() as conn:
-        return {r["league"]: dict(r) for r in conn.execute("SELECT * FROM strategies").fetchall()}
+        rows = [dict(r) for r in conn.execute("SELECT * FROM strategies").fetchall()]
+    if market is None:
+        return {(r["league"], r.get("market") or "draw"): r for r in rows}
+    mk = get_market(market)
+    return {r["league"]: r for r in rows if (r.get("market") or "draw") == mk.key}
 
 
-def save_strategy(code, values):
-    current = get_strategy(code) or {**DEFAULT_STRATEGY, "league": code}
+def save_strategy(code, values, market="draw"):
+    mk = get_market(market)
+    current = get_strategy(code, mk.key) or {**default_for(mk.key), "league": code}
     current.update(values)
     current["league"] = code
-    cols = ["league", "watched", "active", "threshold", "base_stake", "multiplier", "max_steps",
-            "bankroll", "odds_mode", "fixed_odds", "tax", "start_date"]
+    current["market"] = mk.key
+    current["side"] = mk.normalize_side(current.get("side"))
+    cols = ["league", "market", "side", "watched", "active", "threshold", "base_stake", "multiplier",
+            "max_steps", "bankroll", "odds_mode", "fixed_odds", "tax", "start_date"]
     with db.session() as conn:
         conn.execute(
             f"INSERT INTO strategies({','.join(cols)}) VALUES({','.join('?' * len(cols))}) "
-            "ON CONFLICT(league) DO UPDATE SET " + ", ".join(f"{c}=excluded.{c}" for c in cols[1:]),
+            "ON CONFLICT(league, market) DO UPDATE SET "
+            + ", ".join(f"{c}=excluded.{c}" for c in cols if c not in ("league", "market")),
             [current[c] for c in cols],
         )
     return current
 
 
 def live_state(st):
+    market = st.get("market") or "draw"
+    side = st.get("side")
     rows = analysis.matches(st["league"])
     p = strategy.Params.from_row(st)
     start = st.get("start_date") or date.today().isoformat()
     before = [m for m in rows if m["date"] < start]
     after = [m for m in rows if m["date"] >= start]
-    _, initial = analysis.streak_runs(before)
+    _, initial = analysis.streak_runs(before, market, side)
     res = strategy.run(after, p, initial_streak=initial)
     action = strategy.next_action(res, p)
     return {"params": p, "result": res, "action": action, "start": start}
@@ -74,11 +102,10 @@ def _do_refresh(full=False, kind="live"):
         return False
     _refresh_state.update(running=True, started=datetime.now().strftime("%H:%M:%S"), log=[], kind=kind)
     try:
-        live.ensure_default_watches()
+        ensure_default_watches()
         if kind in ("live", "all"):
             live.refresh(log_fn=lambda msg: _refresh_state["log"].append(msg))
         if kind in ("history", "all") or full:
-            # football-data tylko dla lig z fd_code – kursy / długa historia
             from .leagues import LEAGUES
             fd = [lg.code for lg in LEAGUES if lg.fd_code]
             ingest.refresh(full=full, log=lambda msg: _refresh_state["log"].append(msg), leagues=fd)
@@ -106,29 +133,39 @@ def refresh_due():
     return live.live_refresh_due()
 
 
-def history_refresh_due():
-    last = db.get_meta("fd_refresh")
-    if not last:
-        # po live – historia FD opcjonalna
-        return False
-    try:
-        age = datetime.now() - datetime.fromisoformat(last)
-    except ValueError:
-        return True
-    return age.total_seconds() > REFRESH_INTERVAL_MIN * 60
-
-
 def has_data():
     with db.session() as conn:
         return conn.execute("SELECT 1 FROM matches WHERE source='fotmob' LIMIT 1").fetchone() is not None
 
 
+def ensure_default_watches():
+    """Dla każdej z 27 pasujących lig – wiersz strategii w każdym rynku (jeśli brak)."""
+    added = 0
+    with db.session() as conn:
+        existing = {(r["league"], (r["market"] if "market" in r.keys() and r["market"] else "draw"))
+                    for r in conn.execute("SELECT league, market FROM strategies").fetchall()}
+        for lg in FITTING:
+            for mkey in MARKET_ORDER:
+                if (lg.code, mkey) in existing:
+                    continue
+                d = default_for(mkey)
+                conn.execute(
+                    "INSERT INTO strategies(league, market, side, watched, active, threshold, base_stake, "
+                    "multiplier, max_steps, bankroll, odds_mode, fixed_odds, tax, start_date) "
+                    "VALUES(?,?,?,?,0,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                    (lg.code, mkey, d["side"], 1, d["threshold"], d["base_stake"], d["multiplier"],
+                     d["max_steps"], d["bankroll"], d["odds_mode"], d["fixed_odds"], d["tax"], ""),
+                )
+                added += 1
+    return added
+
+
+# Kompatybilność: live.ensure_default_watches woła starszą wersję – nadpiszemy w live.py
 def start_background_scheduler():
-    """Odświeża FotMob co LIVE_REFRESH_MIN. Na darmowym Renderze budzi go /api/cron."""
     def loop():
         time.sleep(5)
         try:
-            live.ensure_default_watches()
+            ensure_default_watches()
             if not has_data():
                 _do_refresh(kind="live")
         except Exception:  # noqa: BLE001
