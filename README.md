@@ -9,7 +9,7 @@ Portal (PWA) do obserwacji lig piłkarskich, w których mecze grane są po kolei
 
 ## Co potrafi
 
-- **Ligi – badanie:** 38 lig z darmowych danych [football-data.co.uk](https://www.football-data.co.uk/) (bez klucza API).
+- **Ligi – badanie:** **168 lig świata** z [FotMob](https://www.fotmob.com/) (wyniki minutowe, bez klucza). 27 lig z meczami „po kolei” (≤10% nakładania godzin) jest domyślnie na pulpicie. Kursy i długa historia: [football-data.co.uk](https://www.football-data.co.uk/).
   Dla każdej ligi: odsetek meczów granych o tej samej godzinie (czy liga jest „po kolei”), bieżąca seria bez remisu,
   historyczny odsetek remisów, najdłuższa seria, średni kurs na remis, następny mecz.
 - **Pulpit:** obserwowane ligi, pasek postępu serii do progu X, alerty, sugerowana stawka i następny mecz.
@@ -56,6 +56,9 @@ Lokalnie dane trafiają do SQLite (`data/unluckybet.db`). Inne polecenia:
 | `SECRET_KEY` | zalecana | Klucz do podpisywania sesji (Render generuje go sam). |
 | `CRON_TOKEN` | zalecana | Token do adresu `/api/cron?token=...` (zewnętrzny pinger). Render generuje go sam. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | nie | Powiadomienia push. Generuje je `python -m unluckybet vapid`. |
+| `LIVE_REFRESH_MIN` | `15` | Jak często odświeżać wyniki FotMob (minuty). |
+| `LIVE_LEAGUES` | (obserwowane / pasujące) | Kody lig do odświeżania na żywo, albo `all`. |
+| `FOTMOB_CACHE` | `data/fotmob-cache` | Cache odpowiedzi FotMob na dysku. |
 | `REFRESH_INTERVAL_MIN` | nie | Co ile minut odświeżać dane (domyślnie 60). |
 | `UNLUCKYBET_SEASONS` | nie | Ile sezonów głównych lig pobierać (domyślnie 10). |
 

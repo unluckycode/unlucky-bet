@@ -4,7 +4,7 @@
 <div class="topbar">
   <h1>Pulpit</h1>
   <form method="post" action="/odswiez" class="meta">
-    <span>Dane z {{ last_refresh or '–' }}</span>
+    <span title="Wyniki i terminarz: FotMob; kursy/historia: football-data.co.uk">Dane aktualne na: <strong>{{ live_refresh|utcpl }}</strong></span>
     <button class="btn small" {{ 'disabled' if refreshing }}>↻ Odśwież</button>
   </form>
 </div>
@@ -14,7 +14,7 @@
     <strong>🔔 Alerty ({{ alerts|length }}):</strong>
     {% for c in alerts %}
       <a href="/liga/{{ c.s.code }}">{{ c.s.league.country }} – {{ c.s.league.name }}</a>
-      ({{ c.s.current_streak }} bez remisu{% if c.action.bet %}, stawka {{ c.action.stake|zl }}{% endif %}){{ ',' if not loop.last }}
+      ({{ c.s.current_streak }} bez remisu{% if c.action.bet %}, stawka {{ c.action.stake|zl }}{% if c.s.next %} · {{ c.s.next[0].home }} – {{ c.s.next[0].away }}{% endif %}{% endif %}){{ ',' if not loop.last }}
     {% endfor %}
   </div>
 {% endif %}
@@ -47,12 +47,12 @@
       <span class="big {{ 'pos' if c.alert }}">{{ s.current_streak }}</span>
       <span class="muted">meczów bez remisu · próg X = {{ c.p.threshold }}</span>
     </div>
+    {% if s.last %}<div class="muted small-line">Ostatni mecz: {{ s.last.home }} {{ s.last.hg }}:{{ s.last.ag }} {{ s.last.away }} · {{ s.last|pltime }}</div>{% endif %}
     <div class="bar"><span style="width: {{ (c.progress * 100)|round(0) }}%"></span></div>
     <dl class="facts">
       <div><dt>Remisy (hist.)</dt><dd>{{ s.draw_rate|pct }}</dd></div>
       <div><dt>Najdłuższa seria</dt><dd>{{ s.longest }}</dd></div>
       <div><dt>Mecze o tej samej godz.</dt><dd>{{ s.overlap_rate|pct(0) }}</dd></div>
-      <div><dt>Ostatni wynik</dt><dd>{{ s.last_date|dpl }}</dd></div>
       {% if c.live %}
         {% set r = c.live.result %}
         <div><dt>Krok martingale</dt><dd>{{ r.state.step if r.state.in_cycle else '–' }}{% if c.p.max_steps %} / {{ c.p.max_steps }}{% endif %}</dd></div>
@@ -67,16 +67,17 @@
     </div>
     {% if s.next %}
       {% set nx = s.next[0] %}
-      <div class="next-match">
-        <span class="muted">Następny mecz · {{ nx.date|dpl(true) }} {{ nx.time }}</span>
+      <div class="next-match {{ 'go' if c.action.bet }}">
+        <span class="label">{% if nx.status == 'playing' %}Mecz w trakcie{% else %}Następny mecz do obstawienia{% endif %}</span>
         <strong>{{ nx.home }} – {{ nx.away }}</strong>
+        <span class="when">{{ nx|pltime }} <small class="muted">(czas polski)</small></span>
         {% if nx.odds_d_avg %}<span class="muted">Kurs na remis (średni): {{ nx.odds_d_avg|num }}</span>{% endif %}
-        {% if s.next|length > 1 and s.next[1].date == nx.date and s.next[1].time == nx.time %}
+        {% if s.next|length > 1 and s.next[1].kickoff_utc == nx.kickoff_utc %}
           <br><span class="badge warn">Uwaga: kilka meczów o tej samej godzinie</span>
         {% endif %}
       </div>
     {% else %}
-      <div class="next-match muted">Brak terminarza w źródle (przerwa / koniec sezonu).</div>
+      <div class="next-match muted">Brak terminarza (przerwa / koniec sezonu).</div>
     {% endif %}
     <div class="actions" style="margin-top:12px">
       <a class="btn small" href="/liga/{{ s.code }}">Szczegóły</a>
@@ -90,6 +91,6 @@
 </div>
 
 {% if cards %}
-<p class="hint">Seria liczona chronologicznie po wszystkich meczach ligi (także między sezonami). Ostatni wynik w źródle może być opóźniony o 1–3 dni.</p>
+<p class="hint">Seria = kolejne mecze całej ligi (wszystkie drużyny) po dokładnej godzinie rozpoczęcia. Remis w którymkolwiek meczu o tej samej godzinie zeruje serię. Wyniki z FotMob (co {{ live_minutes }} min); kursy i długa historia z football-data.co.uk.</p>
 {% endif %}
 {% endblock %}

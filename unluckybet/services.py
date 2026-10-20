@@ -6,11 +6,13 @@ import threading
 import time
 from datetime import date, datetime
 
-from . import analysis, db, ingest, strategy
+from . import analysis, db, ingest, live, strategy
+from .leagues import FITTING
 
 log = logging.getLogger(__name__)
 
-REFRESH_INTERVAL_MIN = int(os.environ.get("REFRESH_INTERVAL_MIN", "60"))
+REFRESH_INTERVAL_MIN = int(os.environ.get("REFRESH_INTERVAL_MIN", "360"))  # football-data rzadziej
+LIVE_REFRESH_MIN = live.LIVE_REFRESH_MIN
 
 DEFAULT_STRATEGY = {
     "watched": 1, "active": 0, "threshold": 5, "base_stake": 10.0, "multiplier": 2.0,
@@ -18,7 +20,7 @@ DEFAULT_STRATEGY = {
 }
 
 _refresh_lock = threading.Lock()
-_refresh_state = {"running": False, "started": None, "log": []}
+_refresh_state = {"running": False, "started": None, "log": [], "kind": ""}
 
 
 def get_strategy(code):
@@ -48,7 +50,6 @@ def save_strategy(code, values):
 
 
 def live_state(st):
-    """Stan strategii "na żywo" (paper trading) od daty aktywacji na rzeczywistych wynikach."""
     rows = analysis.matches(st["league"])
     p = strategy.Params.from_row(st)
     start = st.get("start_date") or date.today().isoformat()
@@ -68,12 +69,19 @@ def refresh_status():
     return dict(_refresh_state, log=list(_refresh_state["log"][-12:]))
 
 
-def _do_refresh(full=False):
+def _do_refresh(full=False, kind="live"):
     if not _refresh_lock.acquire(blocking=False):
         return False
-    _refresh_state.update(running=True, started=datetime.now().strftime("%H:%M:%S"), log=[])
+    _refresh_state.update(running=True, started=datetime.now().strftime("%H:%M:%S"), log=[], kind=kind)
     try:
-        ingest.refresh(full=full, log=lambda msg: _refresh_state["log"].append(msg))
+        live.ensure_default_watches()
+        if kind in ("live", "all"):
+            live.refresh(log_fn=lambda msg: _refresh_state["log"].append(msg))
+        if kind in ("history", "all") or full:
+            # football-data tylko dla lig z fd_code – kursy / długa historia
+            from .leagues import LEAGUES
+            fd = [lg.code for lg in LEAGUES if lg.fd_code]
+            ingest.refresh(full=full, log=lambda msg: _refresh_state["log"].append(msg), leagues=fd)
         analysis.invalidate()
         from . import notify
         result = notify.check_and_notify()
@@ -87,17 +95,22 @@ def _do_refresh(full=False):
     return True
 
 
-def refresh_async(full=False):
+def refresh_async(full=False, kind="live"):
     if refresh_running():
         return False
-    threading.Thread(target=_do_refresh, kwargs={"full": full}, daemon=True).start()
+    threading.Thread(target=_do_refresh, kwargs={"full": full, "kind": kind}, daemon=True).start()
     return True
 
 
 def refresh_due():
-    last = db.get_meta("last_refresh")
+    return live.live_refresh_due()
+
+
+def history_refresh_due():
+    last = db.get_meta("fd_refresh")
     if not last:
-        return True
+        # po live – historia FD opcjonalna
+        return False
     try:
         age = datetime.now() - datetime.fromisoformat(last)
     except ValueError:
@@ -107,22 +120,25 @@ def refresh_due():
 
 def has_data():
     with db.session() as conn:
-        return conn.execute("SELECT 1 FROM matches LIMIT 1").fetchone() is not None
+        return conn.execute("SELECT 1 FROM matches WHERE source='fotmob' LIMIT 1").fetchone() is not None
 
 
 def start_background_scheduler():
-    """Odświeża dane co REFRESH_INTERVAL_MIN minut, dopóki proces działa.
-
-    Na darmowym Renderze proces usypia po ~15 min bez ruchu – wtedy budzi go zewnętrzny
-    pinger wywołujący /api/cron (patrz README)."""
+    """Odświeża FotMob co LIVE_REFRESH_MIN. Na darmowym Renderze budzi go /api/cron."""
     def loop():
         time.sleep(5)
+        try:
+            live.ensure_default_watches()
+            if not has_data():
+                _do_refresh(kind="live")
+        except Exception:  # noqa: BLE001
+            log.exception("Pierwsze odświeżanie")
         while True:
             try:
-                if refresh_due():
-                    _do_refresh()
+                if live.live_refresh_due():
+                    _do_refresh(kind="live")
             except Exception:  # noqa: BLE001
                 log.exception("Błąd harmonogramu")
-            time.sleep(300)
+            time.sleep(60)
 
     threading.Thread(target=loop, daemon=True, name="scheduler").start()

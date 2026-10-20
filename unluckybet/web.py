@@ -3,7 +3,7 @@ import hmac
 import logging
 import os
 import secrets
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import markdown
@@ -11,7 +11,7 @@ from flask import (Flask, abort, flash, jsonify, redirect, render_template, requ
                    session, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import analysis, auth, db, notify, services, strategy
+from . import analysis, auth, db, live, notify, services, strategy
 from .leagues import BY_CODE, LEAGUES
 
 log = logging.getLogger("unluckybet.auth")
@@ -74,10 +74,32 @@ def fmt_date(v, weekday=False):
     return f"{WEEKDAYS[d.weekday()]}, {s}" if weekday else s
 
 
+@app.template_filter("pltime")
+def fmt_pl_time(m, weekday=True):
+    """Data i godzina meczu w czasie polskim."""
+    if not m:
+        return "–"
+    if isinstance(m, dict):
+        d, t = live.kickoff_pl(m)
+    else:
+        d, t = m, ""
+    return f"{fmt_date(d, weekday)} {t}".strip()
+
+
+@app.template_filter("utcpl")
+def fmt_utc_pl(v):
+    if not v:
+        return "–"
+    dt = datetime.fromisoformat(v.replace("Z", "+00:00")).astimezone(live.PL)
+    return f"{fmt_date(dt.date().isoformat())} {dt:%H:%M}"
+
+
 @app.context_processor
 def inject():
     return {
         "last_refresh": (db.get_meta("last_refresh") or "")[:16],
+        "live_refresh": db.get_meta("live_refresh") or "",
+        "live_minutes": live.LIVE_REFRESH_MIN,
         "refreshing": services.refresh_running(),
         "push_enabled": notify.enabled(),
         "vapid_public_key": notify.VAPID_PUBLIC_KEY,
@@ -219,14 +241,22 @@ def dashboard():
 @app.route("/ligi")
 def leagues():
     sort = request.args.get("sort", "overlap")
+    fit = request.args.get("fit", "pasuje")
     keys = {
         "overlap": lambda s: s["overlap_rate"] if s["overlap_rate"] is not None else 9,
-        "streak": lambda s: -s["current_streak"],
-        "draws": lambda s: -s["draw_rate"],
-        "longest": lambda s: -s["longest"],
+        "streak": lambda s: -s.get("current_streak", 0),
+        "draws": lambda s: -(s.get("draw_rate") or 0),
+        "longest": lambda s: -s.get("longest", 0),
     }
-    rows = sorted(analysis.all_summaries(), key=keys.get(sort, keys["overlap"]))
-    return render_template("leagues.html", rows=rows, sort=sort, strategies=services.all_strategies())
+    rows = analysis.all_summaries()
+    n_fit = sum(1 for s in rows if s.get("fit_tone") == "good")
+    if fit == "pasuje":
+        rows = [s for s in rows if s.get("fit_tone") == "good"]
+    elif fit == "częściowo":
+        rows = [s for s in rows if s.get("fit_tone") == "warn"]
+    rows = sorted(rows, key=keys.get(sort, keys["overlap"]))
+    return render_template("leagues.html", rows=rows, sort=sort, fit=fit, n_fit=n_fit,
+                           strategies=services.all_strategies())
 
 
 @app.route("/liga/<code>")
@@ -239,13 +269,10 @@ def league(code):
         k: services.DEFAULT_STRATEGY[k] for k in ("threshold", "base_stake", "multiplier", "max_steps",
                                                    "bankroll", "odds_mode", "fixed_odds", "tax")})
     live = services.live_state(st) if st and st["active"] else None
-    recent, streak = [], 0
-    for m in rows[-400:]:
-        streak = 0 if m["res"] == "D" else streak + 1
-        recent.append({**m, "streak": streak})
+    recent = list(reversed(analysis.with_streaks(rows[-400:])[-30:]))
     return render_template(
         "league.html", lg=lg, s=s, st=st, params=params, live=live,
-        recent=list(reversed(recent[-30:])),
+        recent=recent,
         cond=analysis.league_conditional(code),
         dist=analysis.run_length_distribution(rows),
         capital=strategy.capital_needed(params),
@@ -289,9 +316,10 @@ def backtest():
     st = services.get_strategy(code)
     base = st or services.DEFAULT_STRATEGY
     params = strategy.Params(**_strategy_form(request.args if "threshold" in request.args else base))
-    seasons = sorted({m["season"] for m in analysis.matches(code)})
+    hist = analysis.matches_history(code)
+    seasons = sorted({m["season"] for m in hist if m.get("season")})
     since = request.args.get("since") or (seasons[0] if seasons else "")
-    rows = [m for m in analysis.matches(code) if m["season"] >= since]
+    rows = [m for m in hist if (m.get("season") or "") >= since]
     result = strategy.run(rows, params)
     sweep = strategy.sweep(rows, params)
     link_args = {k: v for k, v in params.__dict__.items() if k != "threshold"}
@@ -379,7 +407,8 @@ def settings():
 
 @app.route("/odswiez", methods=["POST"])
 def refresh():
-    started = services.refresh_async(full=bool(request.form.get("full")))
+    kind = "all" if request.form.get("full") else "live"
+    started = services.refresh_async(full=bool(request.form.get("full")), kind=kind)
     flash("Rozpoczęto pobieranie danych – potrwa to od kilkudziesięciu sekund do kilku minut."
           if started else "Odświeżanie już trwa.", "ok")
     return redirect(request.form.get("back") or url_for("dashboard"))
@@ -395,9 +424,13 @@ def cron():
     token = request.args.get("token") or request.headers.get("X-Cron-Token", "")
     if not CRON_TOKEN or not hmac.compare_digest(token, CRON_TOKEN):
         return jsonify(error="Nieprawidłowy token"), 403
-    started = services.refresh_async() if (services.refresh_due() or request.args.get("force")) else False
+    force = bool(request.args.get("force"))
+    started = False
+    if services.refresh_due() or force:
+        started = services.refresh_async(kind="all" if request.args.get("full") else "live")
     return jsonify(ok=True, refresh_started=started, refreshing=services.refresh_running(),
-                   last_refresh=db.get_meta("last_refresh")), 202 if started else 200
+                   last_refresh=db.get_meta("last_refresh"),
+                   live_refresh=db.get_meta("live_refresh")), 202 if started else 200
 
 
 @app.route("/api/push/subscribe", methods=["POST"])
