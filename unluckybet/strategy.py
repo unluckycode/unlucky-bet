@@ -13,7 +13,7 @@ Zasady (wspólne dla backtestu i śledzenia "na żywo"):
 
 from dataclasses import dataclass, field
 
-from .analysis import kickoff_groups
+from .analysis import advance, kickoff_groups
 
 
 @dataclass
@@ -137,12 +137,9 @@ def run(rows, p: Params, initial_streak=0):
             peak = max(peak, st.pnl)
             res.max_drawdown = max(res.max_drawdown, peak - st.pnl)
             res.equity.append((target["date"], st.pnl))
-        for m in group:
-            if m["res"] == "D":
-                st.streak = 0
-                st.waiting_reset = False
-            else:
-                st.streak += 1
+        st.streak = advance(st.streak, group)
+        if st.streak == 0:
+            st.waiting_reset = False
     return res
 
 

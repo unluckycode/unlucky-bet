@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS matches (
     hg INTEGER, ag INTEGER,
     res TEXT NOT NULL,
     odds_d_avg REAL, odds_d_max REAL, odds_d_b365 REAL,
+    kickoff_utc TEXT NOT NULL DEFAULT '',
+    event_id TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'football-data',
     UNIQUE(league, date, home, away)
 );
 CREATE INDEX IF NOT EXISTS ix_matches_league ON matches(league, date, time);
@@ -39,6 +42,9 @@ CREATE TABLE IF NOT EXISTS fixtures (
     home TEXT NOT NULL,
     away TEXT NOT NULL,
     odds_d_avg REAL, odds_d_max REAL, odds_d_b365 REAL,
+    kickoff_utc TEXT NOT NULL DEFAULT '',
+    event_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'upcoming',
     UNIQUE(league, date, home, away)
 );
 
@@ -159,6 +165,12 @@ def session():
 MIGRATIONS = [
     ("strategies", "tax", "REAL NOT NULL DEFAULT 0.12"),
     ("bets", "tax", "REAL NOT NULL DEFAULT 0.12"),
+    ("matches", "kickoff_utc", "TEXT NOT NULL DEFAULT ''"),
+    ("matches", "event_id", "TEXT NOT NULL DEFAULT ''"),
+    ("matches", "source", "TEXT NOT NULL DEFAULT 'football-data'"),
+    ("fixtures", "kickoff_utc", "TEXT NOT NULL DEFAULT ''"),
+    ("fixtures", "event_id", "TEXT NOT NULL DEFAULT ''"),
+    ("fixtures", "status", "TEXT NOT NULL DEFAULT 'upcoming'"),
 ]
 
 
@@ -175,6 +187,9 @@ def init_db():
             conn.commit()
         finally:
             conn.close()
+    # Indeks po migracji kolumn (CREATE TABLE IF NOT EXISTS nie dodaje ich do starej tabeli).
+    with session() as conn:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_matches_kickoff ON matches(league, kickoff_utc)")
 
 
 def get_meta(key, default=None):

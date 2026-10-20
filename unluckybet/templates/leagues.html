@@ -3,15 +3,18 @@
 {% block content %}
 <div class="topbar">
   <h1>Ligi – badanie</h1>
-  <span class="meta">{{ rows|length }} lig · sortuj:
-    <a href="?sort=overlap">nakładanie</a> · <a href="?sort=streak">seria</a> · <a href="?sort=draws">remisy</a> · <a href="?sort=longest">rekord</a>
+  <span class="meta">{{ rows|length }} lig ·
+    <a href="?fit=pasuje">pasujące ({{ n_fit }})</a> ·
+    <a href="?fit=częściowo">częściowo</a> ·
+    <a href="?fit=">wszystkie</a> · sortuj:
+    <a href="?sort=overlap&fit={{ fit }}">nakładanie</a> · <a href="?sort=streak&fit={{ fit }}">seria</a> ·
+    <a href="?sort=draws&fit={{ fit }}">remisy</a> · <a href="?sort=longest&fit={{ fit }}">rekord</a>
   </span>
 </div>
 <div class="callout">
-  <strong>Jak czytać „mecze o tej samej godzinie”?</strong> Odsetek meczów z ostatnich 3 sezonów, które startowały
-  dokładnie o tej samej dacie i godzinie co inny mecz tej ligi (bez ostatniego tygodnia zakończonych sezonów, gdzie
-  zwykle gra się jednocześnie). Do strategii „po kolei” szukamy lig z wartością ≤ 15%
-  (<span class="badge good">pasuje</span>), 15–35% to <span class="badge warn">częściowo</span>.
+  <strong>168 lig świata (FotMob).</strong> „Ta sama godzina” = odsetek meczów startujących jednocześnie z innym
+  meczem ligi. <span class="badge good">pasuje</span> ≤ 10%, <span class="badge warn">częściowo</span> 10–20%.
+  Seria liczona po wszystkich meczach ligi wg kickoffu. Domyślnie na pulpicie wyróżnione są ligi pasujące.
 </div>
 <div class="card">
   <div class="table-wrap cards">
@@ -32,7 +35,7 @@
           <td class="num" data-label="Rekord serii">{{ s.longest }}</td>
           <td class="num" data-label="Śr. kurs na remis">{{ s.avg_draw_odds|num }}</td>
           <td data-label="Ostatni wynik">{{ s.last_date|dpl }}</td>
-          <td data-label="Następny mecz">{% if s.next %}{{ s.next[0].date|dpl }} {{ s.next[0].time }} · {{ s.next[0].home }} – {{ s.next[0].away }}{% else %}<span class="muted">–</span>{% endif %}</td>
+          <td data-label="Następny mecz">{% if s.next %}{{ s.next[0]|pltime(false) }} · {{ s.next[0].home }} – {{ s.next[0].away }}{% else %}<span class="muted">–</span>{% endif %}</td>
           <td data-label="">
             <form method="post" action="/liga/{{ s.code }}/obserwuj">
               <input type="hidden" name="back" value="/ligi?sort={{ sort }}">

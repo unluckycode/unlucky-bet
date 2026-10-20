@@ -13,7 +13,7 @@
   <div class="card">Brak danych dla tej ligi. Odśwież dane na pulpicie.</div>
 {% else %}
 <div class="grid kpis">
-  <div class="card kpi"><div class="label">Seria bez remisu</div><div class="value {{ 'pos' if s.current_streak >= params.threshold }}">{{ s.current_streak }}</div><div class="sub">do {{ s.last_date|dpl }}</div></div>
+  <div class="card kpi"><div class="label">Seria bez remisu</div><div class="value {{ 'pos' if s.current_streak >= params.threshold }}">{{ s.current_streak }}</div><div class="sub">{% if s.last %}po {{ s.last|pltime(false) }}{% else %}do {{ s.last_date|dpl }}{% endif %}</div></div>
   <div class="card kpi"><div class="label">Remisy historycznie</div><div class="value">{{ s.draw_rate|pct }}</div><div class="sub">{{ s.draws }} z {{ s.n }} meczów</div></div>
   <div class="card kpi"><div class="label">Rekord serii</div><div class="value">{{ s.longest }}</div><div class="sub">{{ s.longest_span[0]|dpl }} – {{ s.longest_span[1]|dpl }}</div></div>
   <div class="card kpi"><div class="label">Ta sama godzina</div><div class="value">{{ s.overlap_rate|pct(0) }}</div><div class="sub"><span class="badge {{ s.fit_tone }}">{{ s.fit }}</span> maks. {{ s.overlap.max_parallel if s.overlap else '–' }} naraz</div></div>
@@ -55,7 +55,7 @@
       <div class="table-wrap"><table>
         <tr><th>Data</th><th>Mecz</th><th class="num">Kurs X</th></tr>
         {% for f in s.next %}
-          <tr><td>{{ f.date|dpl }} {{ f.time }}</td><td>{{ f.home }} – {{ f.away }}</td><td class="num">{{ f.odds_d_avg|num }}</td></tr>
+          <tr class="{{ 'hl' if loop.first }}"><td>{{ f|pltime }}</td><td>{{ f.home }} – {{ f.away }}{% if loop.first %} <span class="badge good">do obstawienia</span>{% endif %}</td><td class="num">{{ f.odds_d_avg|num }}</td></tr>
         {% endfor %}
       </table></div>
       <p class="hint">Mecze z datą w przeszłości mogły już się odbyć – wynik pojawi się po aktualizacji źródła.</p>
@@ -93,9 +93,9 @@
   <section class="card">
     <h2>Ostatnie mecze</h2>
     <div class="table-wrap"><table>
-      <tr><th>Data</th><th>Godz.</th><th>Mecz</th><th class="num">Wynik</th><th class="num">Seria</th></tr>
+      <tr><th>Rozpoczęcie (PL)</th><th>Mecz</th><th class="num">Wynik</th><th class="num">Seria</th></tr>
       {% for m in recent %}
-        <tr class="{{ 'hl' if m.res == 'D' }}"><td>{{ m.date|dpl }}</td><td>{{ m.time or '–' }}</td><td>{{ m.home }} – {{ m.away }}</td>
+        <tr class="{{ 'hl' if m.res == 'D' }}"><td>{{ m|pltime(false) }}</td><td>{{ m.home }} – {{ m.away }}{% if m.source == 'fotmob' %} <span class="badge info">FotMob</span>{% endif %}</td>
           <td class="num">{{ m.hg }}:{{ m.ag }}</td><td class="num">{{ m.streak }}</td></tr>
       {% endfor %}
     </table></div>

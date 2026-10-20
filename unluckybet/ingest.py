@@ -210,13 +210,17 @@ def refresh(full=False, log=print, leagues=None):
                                 log(f"  {lg.code} {sc}: brak pliku ({err})")
                             continue
                         rows = parse_main(lg.code, sc, raw)
-                        conn.execute("DELETE FROM matches WHERE league=? AND season=?", (lg.code, season))
+                        conn.execute(
+                            "DELETE FROM matches WHERE league=? AND season=? AND COALESCE(source,'football-data')!='fotmob'",
+                            (lg.code, season))
                         conn.executemany(MATCH_SQL, rows)
                         n += len(rows)
                 else:
                     raw = _fetch(f"{BASE_URL}/new/{lg.code}.csv", RAW_DIR / "new" / f"{lg.code}.csv", CACHE_MAX_AGE)
                     rows = parse_extra(lg.code, raw)
-                    conn.execute("DELETE FROM matches WHERE league=?", (lg.code,))
+                    conn.execute(
+                        "DELETE FROM matches WHERE league=? AND COALESCE(source,'football-data')!='fotmob'",
+                        (lg.code,))
                     conn.executemany(MATCH_SQL, rows)
                     n = len(rows)
             except Exception as err:  # noqa: BLE001
@@ -234,16 +238,20 @@ def refresh(full=False, log=print, leagues=None):
                 fixtures += parse_fixtures(raw, extra)
             except Exception as err:  # noqa: BLE001
                 errors.append(f"{name}: {err}")
-        conn.execute("DELETE FROM fixtures")
+        # Terminarz „na żywo” utrzymuje FotMob (live.py). Tutaj tylko dokładamy kursy
+        # z football-data bez kasowania wpisów FotMob.
         conn.executemany(
             "INSERT INTO fixtures(league, date, time, home, away, odds_d_avg, odds_d_max, odds_d_b365) "
             "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING", fixtures)
-        log(f"Terminarz: {len(fixtures)} nadchodzących meczów")
+        log(f"Terminarz football-data: {len(fixtures)} meczów (kursy; wyniki z FotMob)")
 
         settled = settle_pending_bets(conn)
         if settled:
             log(f"Automatycznie rozliczono zakładów: {settled}")
 
+    db.set_meta("fd_refresh", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    # last_refresh ustawiane też przez live – nie nadpisuj świeższego FotMob starszym FD, jeśli live nowszy
+    live_ts = db.get_meta("live_refresh")
     db.set_meta("last_refresh", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     db.set_meta("refresh_errors", "; ".join(errors))
     return total, errors
