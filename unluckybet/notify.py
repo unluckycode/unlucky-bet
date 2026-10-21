@@ -80,28 +80,33 @@ def collect_alerts():
         strategies = [dict(r) for r in conn.execute("SELECT * FROM strategies WHERE watched=1").fetchall()]
         for st in strategies:
             code = st["league"]
-            s = analysis.summary(code)
+            market = st.get("market") or "draw"
+            side = st.get("side")
+            from .markets import get_market
+            mk = get_market(market)
+            s = analysis.summary(code, market, side)
             if not s or not s.get("n"):
                 continue
             name = f"{BY_CODE[code].country} – {BY_CODE[code].name}"
             p = strategy.Params.from_row(st)
             if s["current_streak"] >= p.threshold:
-                last_draw = s["last_draw"]["date"] if s["last_draw"] else "brak"
-                if _once(conn, f"streak:{code}:{last_draw}"):
+                last_hit = (s.get("last_hit") or s.get("last_draw") or {}).get("date") if (s.get("last_hit") or s.get("last_draw")) else "brak"
+                if _once(conn, f"streak:{market}:{code}:{last_hit}"):
                     nx = s["next"][0] if s["next"] else None
-                    nxt = f" Następny mecz: {nx['home']} – {nx['away']} ({nx['date']} {nx['time']})." if nx else ""
-                    alerts.append((f"{name}: {s['current_streak']} meczów bez remisu",
-                                   f"Seria osiągnęła próg X={p.threshold}. Stawka startowa {p.stake(1):.2f} zł.{nxt}",
-                                   f"/liga/{code}"))
+                    nxt = f" Następny mecz: {nx['home']} – {nx['away']}." if nx else ""
+                    alerts.append((f"{mk.name} · {name}: seria {s['current_streak']}",
+                                   f"{mk.streak_label(side)}. Próg X={p.threshold}. Stawka {p.stake(1):.2f} zł na {mk.bet_label(side)}.{nxt}",
+                                   f"/rynek/{market}/liga/{code}"))
             if st["active"]:
                 live = live_state(st)
                 for b in live["result"].bets[-3:]:
-                    if _once(conn, f"paper:{code}:{b['date']}:{b['home']}"):
-                        verdict = f"REMIS – wygrana {b['profit']:+.2f} zł" if b["won"] else f"brak remisu – strata {b['stake']:.2f} zł"
+                    if _once(conn, f"paper:{market}:{code}:{b['date']}:{b['home']}"):
+                        label = mk.bet_label(side)
+                        verdict = f"{label} – wygrana {b['profit']:+.2f} zł" if b["won"] else f"brak ({label}) – strata {b['stake']:.2f} zł"
                         nxt = live["action"]
                         tail = f" Następna stawka: {nxt['stake']:.2f} zł." if nxt.get("bet") else ""
-                        alerts.append((f"{name}: {b['home']} {b['score']} {b['away']}",
-                                       f"Krok {b['step']}: {verdict}.{tail}", f"/liga/{code}"))
+                        alerts.append((f"{mk.name} · {name}: {b['home']} {b['score']} {b['away']}",
+                                       f"Krok {b['step']}: {verdict}.{tail}", f"/rynek/{market}/liga/{code}"))
         for bet in conn.execute("SELECT * FROM bets WHERE status IN ('won','lost')").fetchall():
             if _once(conn, f"bet:{bet['id']}:{bet['status']}"):
                 verdict = (f"wygrana {bet['stake'] * (1 - bet['tax']) * bet['odds'] - bet['stake']:+.2f} zł" if bet["status"] == "won"

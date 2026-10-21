@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ lg.name }}{% endblock %}
 {% block content %}
+{% set mk = market if market is defined else MARKETS["draw"] %}
+{% set side = side if side is defined else mk.default_side %}
 <div class="topbar">
   <h1>{{ lg.name }} <small class="muted">· {{ lg.country }}</small></h1>
-  <form method="post" action="/liga/{{ lg.code }}/obserwuj">
+  <form method="post" action="/rynek/{{ mk.key }}/liga/{{ lg.code }}/obserwuj">
     {% if st and st.watched %}<button class="btn small">✓ Obserwowana – usuń</button>
     {% else %}<button class="btn small primary">+ Obserwuj ligę</button>{% endif %}
   </form>
@@ -13,8 +15,8 @@
   <div class="card">Brak danych dla tej ligi. Odśwież dane na pulpicie.</div>
 {% else %}
 <div class="grid kpis">
-  <div class="card kpi"><div class="label">Seria bez remisu</div><div class="value {{ 'pos' if s.current_streak >= params.threshold }}">{{ s.current_streak }}</div><div class="sub">{% if s.last %}po {{ s.last|pltime(false) }}{% else %}do {{ s.last_date|dpl }}{% endif %}</div></div>
-  <div class="card kpi"><div class="label">Remisy historycznie</div><div class="value">{{ s.draw_rate|pct }}</div><div class="sub">{{ s.draws }} z {{ s.n }} meczów</div></div>
+  <div class="card kpi"><div class="label">{{ mk.streak_label(side) }}</div><div class="value {{ 'pos' if s.current_streak >= params.threshold }}">{{ s.current_streak }}</div><div class="sub">{% if s.last %}po {{ s.last|pltime(false) }}{% else %}do {{ s.last_date|dpl }}{% endif %}</div></div>
+  <div class="card kpi"><div class="label">Trafienia (hist.)</div><div class="value">{{ (s.hit_rate or s.draw_rate)|pct }}</div><div class="sub">{{ s.hits if s.hits is defined else s.draws }} z {{ s.n }} meczów</div></div>
   <div class="card kpi"><div class="label">Rekord serii</div><div class="value">{{ s.longest }}</div><div class="sub">{{ s.longest_span[0]|dpl }} – {{ s.longest_span[1]|dpl }}</div></div>
   <div class="card kpi"><div class="label">Ta sama godzina</div><div class="value">{{ s.overlap_rate|pct(0) }}</div><div class="sub"><span class="badge {{ s.fit_tone }}">{{ s.fit }}</span> maks. {{ s.overlap.max_parallel if s.overlap else '–' }} naraz</div></div>
 </div>
@@ -22,8 +24,19 @@
 <div class="grid cols-2" style="margin-top:14px">
   <section class="card">
     <h2>Strategia</h2>
-    <form method="post" action="/liga/{{ lg.code }}/strategia" class="stack">
+    <form method="post" action="/rynek/{{ mk.key }}/liga/{{ lg.code }}/strategia" class="stack">
       <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if st and st.active }}> Aktywna (śledź zakłady na żywo od daty startu)</label>
+      {% if mk.sides|length > 1 %}
+      <label>Strona zakładu
+        <select name="side">
+          {% for sid in mk.sides %}
+            <option value="{{ sid }}" {{ 'selected' if (st.side if st else mk.default_side) == sid }}>{{ mk.side_labels[sid] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% else %}
+        <input type="hidden" name="side" value="{{ mk.default_side }}">
+      {% endif %}
       <div class="fields">
         <label>Próg X (mecze bez remisu)<input type="number" name="threshold" min="1" max="40" value="{{ params.threshold }}"></label>
         <label>Stawka bazowa (zł)<input type="number" name="base_stake" min="1" step="0.01" value="{{ params.base_stake }}"></label>
@@ -45,7 +58,7 @@
         <strong>{{ ((1 - s.draw_rate) ** (params.max_steps or 10))|pct(2) }}</strong> na cykl.</p>
       <label class="check"><input type="checkbox" name="restart" value="1"> Zacznij śledzenie od nowa (data startu = dziś lub podana)</label>
       <div class="actions"><button class="btn primary">Zapisz</button>
-        <a class="btn" href="/backtest?league={{ lg.code }}">Backtest z tymi ustawieniami →</a></div>
+        <a class="btn" href="/backtest?market={{ mk.key }}&league={{ lg.code }}">Backtest z tymi ustawieniami →</a></div>
     </form>
   </section>
 
@@ -66,7 +79,7 @@
       {% set r = live.result %}
       <h2 style="margin-top:18px">Śledzenie na żywo <span class="badge info">od {{ live.start|dpl }}</span></h2>
       <div class="callout {{ 'good' if live.action.bet }}">
-        {% if live.action.bet %}<strong>Następny zakład: {{ live.action.stake|zl }} na remis (krok {{ live.action.step }})</strong><br>{% endif %}
+        {% if live.action.bet %}<strong>Następny zakład: {{ live.action.stake|zl }} na {{ mk.bet_label(side) }} (krok {{ live.action.step }})</strong><br>{% endif %}
         {{ live.action.reason }}
       </div>
       <dl class="facts">

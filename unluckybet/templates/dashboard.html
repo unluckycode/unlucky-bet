@@ -1,36 +1,61 @@
 {% extends "base.html" %}
-{% block title %}Pulpit{% endblock %}
+{% block title %}{{ market.title }}{% endblock %}
 {% block content %}
+{% set mk = market %}
 <div class="topbar">
-  <h1>Pulpit</h1>
+  <div>
+    <h1>{{ mk.title }}</h1>
+    <p class="muted" style="margin:4px 0 0">{{ mk.blurb }}</p>
+  </div>
   <form method="post" action="/odswiez" class="meta">
-    <span title="Wyniki i terminarz: FotMob; kursy/historia: football-data.co.uk">Dane aktualne na: <strong>{{ live_refresh|utcpl }}</strong></span>
+    <span title="Wyniki i terminarz: FotMob">Dane aktualne na: <strong>{{ live_refresh|utcpl }}</strong></span>
     <button class="btn small" {{ 'disabled' if refreshing }}>↻ Odśwież</button>
   </form>
 </div>
 
+{% if recommendations %}
+<section class="card rec-block">
+  <h2>Rekomendacje teraz</h2>
+  <p class="muted">Ligi z meczami po kolei (nakładanie ≤10%) · próg X = {{ threshold }} · strona: {{ mk.side_labels.get(side, side) }}</p>
+  <ol class="rec-list">
+    {% for s in recommendations %}
+      <li class="{{ 'alert' if s.rec_alert }}">
+        <a href="/rynek/{{ mk.key }}/liga/{{ s.code }}"><strong>{{ s.league.country }} – {{ s.league.name }}</strong></a>
+        <span class="badge {{ s.fit_tone }}">{{ s.fit }}</span>
+        <span class="bigish {{ 'pos' if s.rec_alert }}">seria {{ s.current_streak }}</span>
+        <span class="muted">trafienia {{ s.hit_rate|pct }} · rekord {{ s.longest }}</span>
+        {% if s.next %}
+          <div class="muted">Następny: {{ s.next[0].home }} – {{ s.next[0].away }} · {{ s.next[0]|pltime }}</div>
+        {% endif %}
+        <div class="muted small-line">{{ s.rec_reason }}</div>
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+
 {% if alerts %}
   <div class="callout good">
-    <strong>🔔 Alerty ({{ alerts|length }}):</strong>
+    <strong>Alerty ({{ alerts|length }}):</strong>
     {% for c in alerts %}
-      <a href="/liga/{{ c.s.code }}">{{ c.s.league.country }} – {{ c.s.league.name }}</a>
-      ({{ c.s.current_streak }} bez remisu{% if c.action.bet %}, stawka {{ c.action.stake|zl }}{% if c.s.next %} · {{ c.s.next[0].home }} – {{ c.s.next[0].away }}{% endif %}{% endif %}){{ ',' if not loop.last }}
+      <a href="/rynek/{{ mk.key }}/liga/{{ c.s.code }}">{{ c.s.league.country }} – {{ c.s.league.name }}</a>
+      (seria {{ c.s.current_streak }}{% if c.action.bet %}, {{ c.action.stake|zl }} na {{ mk.bet_label(c.st.side or side) }}{% if c.s.next %} · {{ c.s.next[0].home }} – {{ c.s.next[0].away }}{% endif %}{% endif %}){{ ',' if not loop.last }}
     {% endfor %}
   </div>
 {% endif %}
 
 {% if not cards %}
   <div class="card">
-    <h2>Brak obserwowanych lig</h2>
-    <p class="muted">Dodaj ligi, w których mecze rozgrywane są po kolei (rzadko o tej samej godzinie). Najlepiej pasujące według danych:</p>
+    <h2>Brak obserwowanych lig w tym rynku</h2>
+    <p class="muted">Dodaj ligi z meczami rozgrywanymi po kolei. Najlepiej pasujące:</p>
     <div class="actions">
       {% for s in suggestions %}
-        <form method="post" action="/liga/{{ s.code }}/obserwuj">
-          <input type="hidden" name="back" value="/">
-          <button class="btn">+ {{ s.league.country }} – {{ s.league.name }} <span class="badge good">{{ s.overlap_rate|pct(0) }} nakładania</span></button>
+        <form method="post" action="/rynek/{{ mk.key }}/liga/{{ s.code }}/obserwuj">
+          <input type="hidden" name="back" value="/rynek/{{ mk.key }}">
+          <button class="btn">+ {{ s.league.country }} – {{ s.league.name }} <span class="badge good">{{ s.overlap_rate|pct(0) }}</span></button>
         </form>
       {% endfor %}
-      <a class="btn" href="/ligi">Wszystkie ligi →</a>
+      <a class="btn" href="/ligi?market={{ mk.key }}">Wszystkie ligi →</a>
     </div>
   </div>
 {% endif %}
@@ -38,31 +63,32 @@
 <div class="grid cols-3">
 {% for c in cards %}
   {% set s = c.s %}
+  {% set bet_lbl = mk.bet_label(c.st.side or side) %}
   <article class="card {{ 'alert' if c.alert }}">
     <h2>
-      <a href="/liga/{{ s.code }}" style="color:inherit">{{ s.league.name }} <small>· {{ s.league.country }}</small></a>
+      <a href="/rynek/{{ mk.key }}/liga/{{ s.code }}" style="color:inherit">{{ s.league.name }} <small>· {{ s.league.country }}</small></a>
       {% if c.st.active %}<span class="badge good">aktywna</span>{% else %}<span class="badge">obserwowana</span>{% endif %}
+      {% if mk.sides|length > 1 %}<span class="badge info">{{ mk.side_labels.get(c.st.side or side) }}</span>{% endif %}
     </h2>
     <div class="streak">
       <span class="big {{ 'pos' if c.alert }}">{{ s.current_streak }}</span>
-      <span class="muted">meczów bez remisu · próg X = {{ c.p.threshold }}</span>
+      <span class="muted">{{ mk.streak_label(c.st.side or side) }} · X = {{ c.p.threshold }}</span>
     </div>
     {% if s.last %}<div class="muted small-line">Ostatni mecz: {{ s.last.home }} {{ s.last.hg }}:{{ s.last.ag }} {{ s.last.away }} · {{ s.last|pltime }}</div>{% endif %}
     <div class="bar"><span style="width: {{ (c.progress * 100)|round(0) }}%"></span></div>
     <dl class="facts">
-      <div><dt>Remisy (hist.)</dt><dd>{{ s.draw_rate|pct }}</dd></div>
+      <div><dt>Trafienia (hist.)</dt><dd>{{ s.hit_rate|pct }}</dd></div>
       <div><dt>Najdłuższa seria</dt><dd>{{ s.longest }}</dd></div>
-      <div><dt>Mecze o tej samej godz.</dt><dd>{{ s.overlap_rate|pct(0) }}</dd></div>
+      <div><dt>Ta sama godzina</dt><dd>{{ s.overlap_rate|pct(0) }}</dd></div>
       {% if c.live %}
         {% set r = c.live.result %}
         <div><dt>Krok martingale</dt><dd>{{ r.state.step if r.state.in_cycle else '–' }}{% if c.p.max_steps %} / {{ c.p.max_steps }}{% endif %}</dd></div>
         <div><dt>Strata w cyklu</dt><dd class="{{ 'neg' if r.state.cycle_loss }}">{{ r.state.cycle_loss|zl }}</dd></div>
         <div><dt>Wynik symulacji</dt><dd class="{{ 'pos' if r.state.pnl > 0 else ('neg' if r.state.pnl < 0) }}">{{ r.state.pnl|zl(true) }}</dd></div>
-        <div><dt>Zakłady od {{ c.live.start|dpl }}</dt><dd>{{ r.bets|length }}</dd></div>
       {% endif %}
     </dl>
     <div class="callout {{ 'good' if c.action.bet else '' }}" style="margin:8px 0">
-      {% if c.action.bet %}<strong>Postaw {{ c.action.stake|zl }} na remis</strong><br>{% endif %}
+      {% if c.action.bet %}<strong>Postaw {{ c.action.stake|zl }} na {{ bet_lbl }}</strong><br>{% endif %}
       <span class="muted">{{ c.action.reason }}</span>
     </div>
     {% if s.next %}
@@ -71,19 +97,16 @@
         <span class="label">{% if nx.status == 'playing' %}Mecz w trakcie{% else %}Następny mecz do obstawienia{% endif %}</span>
         <strong>{{ nx.home }} – {{ nx.away }}</strong>
         <span class="when">{{ nx|pltime }} <small class="muted">(czas polski)</small></span>
-        {% if nx.odds_d_avg %}<span class="muted">Kurs na remis (średni): {{ nx.odds_d_avg|num }}</span>{% endif %}
-        {% if s.next|length > 1 and s.next[1].kickoff_utc == nx.kickoff_utc %}
-          <br><span class="badge warn">Uwaga: kilka meczów o tej samej godzinie</span>
-        {% endif %}
+        {% if nx.odds_d_avg and mk.key == 'draw' %}<span class="muted">Kurs (średni): {{ nx.odds_d_avg|num }}</span>{% endif %}
       </div>
     {% else %}
       <div class="next-match muted">Brak terminarza (przerwa / koniec sezonu).</div>
     {% endif %}
     <div class="actions" style="margin-top:12px">
-      <a class="btn small" href="/liga/{{ s.code }}">Szczegóły</a>
+      <a class="btn small" href="/rynek/{{ mk.key }}/liga/{{ s.code }}">Szczegóły</a>
       {% if c.action.bet and s.next %}
         {% set nx = s.next[0] %}
-        <a class="btn small primary" href="/zaklady?league={{ s.code }}&match_date={{ nx.date }}&home={{ nx.home|urlencode }}&away={{ nx.away|urlencode }}&stake={{ c.action.stake }}&odds={{ nx.odds_d_avg or c.p.fixed_odds }}&step={{ c.action.step }}&tax_pct={{ (c.p.tax * 100)|round(1) }}">Zapisz zakład</a>
+        <a class="btn small primary" href="/zaklady?league={{ s.code }}&market={{ mk.key }}&match_date={{ nx.date }}&home={{ nx.home|urlencode }}&away={{ nx.away|urlencode }}&stake={{ c.action.stake }}&odds={{ nx.odds_d_avg or c.p.fixed_odds }}&step={{ c.action.step }}&tax_pct={{ (c.p.tax * 100)|round(1) }}">Zapisz zakład</a>
       {% endif %}
     </div>
   </article>
@@ -91,6 +114,6 @@
 </div>
 
 {% if cards %}
-<p class="hint">Seria = kolejne mecze całej ligi (wszystkie drużyny) po dokładnej godzinie rozpoczęcia. Remis w którymkolwiek meczu o tej samej godzinie zeruje serię. Wyniki z FotMob (co {{ live_minutes }} min); kursy i długa historia z football-data.co.uk.</p>
+<p class="hint">Seria = kolejne mecze całej ligi po kickoffie. Trafienie rynku w którymkolwiek meczu o tej samej godzinie zeruje serię. Dane: FotMob (co {{ live_minutes }} min).</p>
 {% endif %}
 {% endblock %}

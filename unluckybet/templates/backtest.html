@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Backtest{% endblock %}
 {% block content %}
-<div class="topbar"><h1>Backtest strategii</h1></div>
+{% set mk = market if market is defined else MARKETS["draw"] %}
+<div class="topbar"><h1>Backtest · {{ mk.name }}</h1></div>
 
 <section class="card">
   <form method="get" class="stack">
+      <input type="hidden" name="market" value="{{ mk.key }}">
     <div class="fields wide">
       <label>Liga
         <select name="league" onchange="this.form.submit()">
@@ -14,6 +16,14 @@
         </select></label>
       <label>Od sezonu
         <select name="since">{% for se in seasons %}<option {{ 'selected' if se == since }}>{{ se }}</option>{% endfor %}</select></label>
+      {% if mk.sides|length > 1 %}
+      <label>Strona
+        <select name="side">
+          {% for sid in mk.sides %}
+            <option value="{{ sid }}" {{ 'selected' if params.side == sid }}>{{ mk.side_labels[sid] }}</option>
+          {% endfor %}
+        </select></label>
+      {% endif %}
       <label>Próg X<input type="number" name="threshold" min="1" max="40" value="{{ params.threshold }}"></label>
       <label>Stawka bazowa (zł)<input type="number" name="base_stake" min="1" step="0.01" value="{{ params.base_stake }}"></label>
       <label>Mnożnik<input type="number" name="multiplier" min="1" step="0.01" value="{{ params.multiplier }}"></label>
