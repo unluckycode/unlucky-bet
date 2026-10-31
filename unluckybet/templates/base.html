@@ -13,26 +13,32 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Unlucky Bet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
   {% block head %}{% endblock %}
 </head>
 <body>
 <div class="offline-banner">Tryb offline – widzisz ostatnio pobrane dane.</div>
 <div class="app">
   {% set ep = request.endpoint %}
-  <aside class="sidebar">
+  {% set on_dash = ep in ('market_dashboard', 'dashboard') %}
+  {% set on_leagues = ep in ('leagues', 'market_league', 'league', 'league_legacy') %}
+  {% set on_teams = ep == 'teams' %}
+  <aside class="sidebar" aria-label="Menu">
     <a class="brand" href="/rynek/draw"><img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="">Unlucky Bet</a>
     <nav class="nav">
       <div class="nav-group-label">Rynki</div>
       {% for key in MARKET_ORDER %}
         {% set m = MARKETS[key] %}
-        <a href="/rynek/{{ key }}" class="{{ 'active' if current_market == key and ep in ('market_dashboard','dashboard') }}">
+        <a href="/rynek/{{ key }}" class="{{ 'active' if current_market == key and on_dash }}">
           <span class="nav-dot"></span><span>{{ m.name }}</span></a>
       {% endfor %}
       <div class="nav-group-label">Narzędzia</div>
-      <a href="/ligi?market={{ current_market }}" class="{{ 'active' if ep in ('leagues', 'market_league', 'league', 'league_legacy') }}">
+      <a href="/ligi?market={{ current_market }}" class="{{ 'active' if on_leagues }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m12 7 4 3-1.5 4.5h-5L8 10z"/></svg>
         <span>Ligi</span></a>
+      <a href="/zespoly" class="{{ 'active' if on_teams }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Zespoły</span></a>
       <a href="/backtest?market={{ current_market }}" class="{{ 'active' if ep == 'backtest' }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg>
         <span>Backtest</span></a>
@@ -42,7 +48,7 @@
       <a href="/matematyka" class="{{ 'active' if ep == 'math_page' }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 5H7l6 7-6 7h11"/></svg>
         <span>Matematyka</span></a>
-      <a href="/ustawienia" class="nav-extra {{ 'active' if ep == 'settings' }}">
+      <a href="/ustawienia" class="{{ 'active' if ep == 'settings' }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
         <span>Ustawienia</span></a>
     </nav>
@@ -51,8 +57,8 @@
   <main class="main">
     <div class="mobile-brand">
       <img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="">Unlucky Bet
-      <span style="flex:1"></span>
-      <a href="/ustawienia" class="btn small" aria-label="Ustawienia">⚙</a>
+      <span class="spacer"></span>
+      <a href="/ustawienia" class="btn small icon-btn" aria-label="Ustawienia">⚙</a>
     </div>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
@@ -69,7 +75,7 @@
       <div class="callout info" id="refresh-banner"><span class="spinner"></span> Trwa pobieranie danych z FotMob… strona odświeży się sama.</div>
     {% endif %}
     {% block content %}{% endblock %}
-    <p class="hint" style="margin-top:28px">
+    <p class="hint footer-note">
       Wyniki: <a href="https://www.fotmob.com/" target="_blank" rel="noopener">FotMob</a>
       · kursy/historia: <a href="https://www.football-data.co.uk/" target="_blank" rel="noopener">football-data.co.uk</a>
       {% if live_refresh %}· dane aktualne na {{ live_refresh|utcpl }}{% endif %}
@@ -77,16 +83,30 @@
     </p>
   </main>
 </div>
-<nav class="bottom-nav" aria-label="Rynki (mobile)">
-  {% for key in MARKET_ORDER %}
-    {% set m = MARKETS[key] %}
-    <a href="/rynek/{{ key }}" class="{{ 'active' if current_market == key }}">{{ m.name }}</a>
-  {% endfor %}
-  <a href="/ligi?market={{ current_market }}">Ligi</a>
-  <a href="/zaklady">Zakłady</a>
+<nav class="bottom-nav" aria-label="Nawigacja">
+  <a href="/rynek/{{ current_market }}" class="{{ 'active' if on_dash }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M6 10.5V20h12v-9.5"/></svg>
+    <span>Pulpit</span>
+  </a>
+  <a href="/ligi?market={{ current_market }}" class="{{ 'active' if on_leagues }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m12 7 4 3-1.5 4.5h-5L8 10z"/></svg>
+    <span>Ligi</span>
+  </a>
+  <a href="/zespoly" class="{{ 'active' if on_teams }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    <span>Zespoły</span>
+  </a>
+  <a href="/backtest?market={{ current_market }}" class="{{ 'active' if ep == 'backtest' }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg>
+    <span>Backtest</span>
+  </a>
+  <a href="/zaklady" class="{{ 'active' if ep == 'bets' }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 5v12"/></svg>
+    <span>Zakłady</span>
+  </a>
 </nav>
 <script>window.UB = { vapidKey: {{ vapid_public_key|tojson }}, pushEnabled: {{ push_enabled|tojson }}, refreshing: {{ refreshing|tojson }} };</script>
-<script src="{{ url_for('static', filename='app.js') }}?v=3"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=5"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

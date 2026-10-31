@@ -304,6 +304,55 @@ def leagues():
                            strategies=services.all_strategies(mk.key))
 
 
+@app.route("/zespoly")
+def teams():
+    """Serie bez remisu liczone osobno dla drużyn (nie całej ligi)."""
+    if not services.has_data():
+        services.refresh_async()
+        return render_template("loading.html")
+    request.market_key = "draw"
+    try:
+        threshold = max(1, min(40, int(request.args.get("x") or 5)))
+    except ValueError:
+        threshold = 5
+    scope = request.args.get("scope") or "pasuje"
+    sort = request.args.get("sort") or "streak"
+    league = (request.args.get("league") or "").strip()
+    if league and league in BY_CODE:
+        codes = [league]
+    elif scope == "all":
+        codes = [lg.code for lg in LEAGUES]
+    elif scope == "watched":
+        strategies = services.all_strategies("draw")
+        codes = [c for c, st in strategies.items() if st.get("watched")] or [
+            lg.code for lg in LEAGUES if lg.fit == "pasuje"]
+    else:
+        codes = [lg.code for lg in LEAGUES if lg.fit == "pasuje"]
+    rows = analysis.team_summaries(codes=codes)
+    n_alert = sum(1 for t in rows if t["current_streak"] >= threshold)
+    show = request.args.get("show") or "alert"
+    if show == "alert":
+        visible = [t for t in rows if t["current_streak"] >= threshold]
+    else:
+        visible = list(rows)
+    keys = {
+        "streak": lambda t: (-t["current_streak"], -t["longest"], t["draw_rate"]),
+        "longest": lambda t: (-t["longest"], -t["current_streak"], t["team"]),
+        "draws": lambda t: (t["draw_rate"], -t["current_streak"]),
+        "team": lambda t: (t["team"].lower(),),
+    }
+    visible = sorted(visible, key=keys.get(sort, keys["streak"]))
+    alerts = analysis.team_recommendations(threshold=threshold, limit=12, codes=codes)
+    league_opts = sorted(
+        {t["code"]: t["league"] for t in rows}.items(),
+        key=lambda kv: (kv[1].country, kv[1].name),
+    )
+    return render_template(
+        "teams.html", rows=visible, all_n=len(rows), n_alert=n_alert, threshold=threshold,
+        scope=scope, sort=sort, show=show, league=league, league_opts=league_opts, alerts=alerts,
+    )
+
+
 @app.route("/liga/<code>")
 def league_legacy(code):
     return redirect(url_for("market_league", market=request.args.get("market") or "draw", code=code))

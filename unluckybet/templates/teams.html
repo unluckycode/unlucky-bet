@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Zespoły – serie bez remisu{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="topbar-copy">
+    <h1>Zespoły – bez remisu</h1>
+    <p class="muted blurb">Seria liczona dla pojedynczej drużyny (nie całej ligi). Remis jej meczu zeruje serię.</p>
+  </div>
+</div>
+
+<div class="filter-bar" role="navigation" aria-label="Filtry zespołów">
+  <form class="filter-form" method="get" action="/zespoly">
+    <label class="inline">Próg X
+      <input type="number" name="x" min="1" max="40" value="{{ threshold }}" class="input-x">
+    </label>
+    <label class="inline">Zakres
+      <select name="scope">
+        <option value="pasuje" {{ 'selected' if scope == 'pasuje' }}>pasujące ligi</option>
+        <option value="watched" {{ 'selected' if scope == 'watched' }}>obserwowane</option>
+        <option value="all" {{ 'selected' if scope == 'all' }}>wszystkie ligi</option>
+      </select>
+    </label>
+    <label class="inline">Liga
+      <select name="league">
+        <option value="">— wszystkie w zakresie —</option>
+        {% for code, lg in league_opts %}
+          <option value="{{ code }}" {{ 'selected' if league == code }}>{{ lg.country }} – {{ lg.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <input type="hidden" name="show" value="{{ show }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <button class="btn small primary">Filtruj</button>
+  </form>
+</div>
+
+<div class="filter-bar">
+  <a class="chip {{ 'active' if show == 'alert' }}" href="?x={{ threshold }}&scope={{ scope }}&league={{ league }}&show=alert&sort={{ sort }}">seria ≥ {{ threshold }} ({{ n_alert }})</a>
+  <a class="chip {{ 'active' if show == 'all' }}" href="?x={{ threshold }}&scope={{ scope }}&league={{ league }}&show=all&sort={{ sort }}">wszystkie drużyny ({{ all_n }})</a>
+  <span class="muted sep">sortuj</span>
+  <a class="chip {{ 'active' if sort == 'streak' }}" href="?x={{ threshold }}&scope={{ scope }}&league={{ league }}&show={{ show }}&sort=streak">seria</a>
+  <a class="chip {{ 'active' if sort == 'longest' }}" href="?x={{ threshold }}&scope={{ scope }}&league={{ league }}&show={{ show }}&sort=longest">rekord</a>
+  <a class="chip {{ 'active' if sort == 'draws' }}" href="?x={{ threshold }}&scope={{ scope }}&league={{ league }}&show={{ show }}&sort=draws">% remisów</a>
+  <a class="chip {{ 'active' if sort == 'team' }}" href="?x={{ threshold }}&scope={{ scope }}&league={{ league }}&show={{ show }}&sort=team">nazwa</a>
+</div>
+
+{% if alerts and show == 'all' %}
+<section class="card rec-block">
+  <h2>Najdłuższe serie teraz (≥ {{ threshold }})</h2>
+  <ol class="rec-list">
+    {% for t in alerts %}
+      <li class="alert">
+        <a href="/rynek/draw/liga/{{ t.code }}"><strong>{{ t.team }}</strong></a>
+        <span class="badge info">{{ t.league.country }}</span>
+        <span class="bigish pos">seria {{ t.current_streak }}</span>
+        <span class="muted">remisy {{ t.draw_rate|pct }} · rekord {{ t.longest }}</span>
+        {% if t.next %}
+          <div class="muted">Następny: {{ t.next.home }} – {{ t.next.away }} · {{ t.next|pltime }}</div>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+
+{% if not rows %}
+  <div class="card">
+    <h2>Brak drużyn powyżej progu</h2>
+    <p class="muted">Obniż X albo pokaż wszystkie drużyny. Dane pochodzą z lig w wybranym zakresie.</p>
+    <a class="btn" href="?x={{ threshold }}&scope={{ scope }}&show=all&sort=streak">Pokaż wszystkie →</a>
+  </div>
+{% else %}
+<div class="card">
+  <div class="table-wrap cards">
+    <table class="responsive">
+      <thead><tr>
+        <th>Drużyna</th><th>Liga</th><th class="num">Seria</th><th class="num">Rekord</th>
+        <th class="num">Remisy</th><th class="num">Mecze</th><th>Ostatni mecz</th><th>Następny</th>
+      </tr></thead>
+      <tbody>
+      {% for t in rows %}
+        <tr class="{{ 'hl' if t.current_streak >= threshold }}">
+          <td class="title" data-label="Drużyna">
+            <strong>{{ t.team }}</strong>
+            {% if t.current_streak >= threshold %}<span class="badge good">≥ X</span>{% endif %}
+          </td>
+          <td data-label="Liga"><a href="/rynek/draw/liga/{{ t.code }}">{{ t.league.country }} – {{ t.league.name }}</a></td>
+          <td class="num" data-label="Seria bez remisu"><strong class="{{ 'pos' if t.current_streak >= threshold }}">{{ t.current_streak }}</strong></td>
+          <td class="num" data-label="Rekord serii">{{ t.longest }}</td>
+          <td class="num" data-label="% remisów">{{ t.draw_rate|pct }}</td>
+          <td class="num" data-label="Mecze">{{ t.n }}</td>
+          <td data-label="Ostatni mecz">
+            {% if t.last %}
+              {{ t.last.home }} {{ t.last.hg }}:{{ t.last.ag }} {{ t.last.away }}
+              <span class="muted">· {{ t.last|pltime(false) }}</span>
+            {% else %}–{% endif %}
+          </td>
+          <td data-label="Następny mecz">
+            {% if t.next %}
+              {% if t.venue == 'H' %}vs {{ t.opponent }}{% else %}@ {{ t.opponent }}{% endif %}
+              <span class="muted">· {{ t.next|pltime(false) }}</span>
+            {% else %}<span class="muted">–</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="hint">Seria drużyny = kolejne jej mecze (dom + wyjazd) bez remisu. To inna metryka niż seria ligi na pulpicie remisów.</p>
+{% endif %}
+{% endblock %}

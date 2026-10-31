@@ -414,3 +414,82 @@ def league_conditional(code, max_x=12):
         out.append({"x": x, "n": n, "draws": k, "rate": k / n, "expected": p,
                     "lo": lo, "hi": hi, "z": z_score(k, n, p)})
     return out
+
+
+def _team_streak_stats(tmatches):
+    """Bieżąca i najdłuższa seria meczów drużyny bez remisu."""
+    streak = 0
+    for m in reversed(tmatches):
+        if m.get("res") == "D":
+            break
+        streak += 1
+    best, cur, start, best_span = 0, 0, None, (None, None)
+    for m in tmatches:
+        if m.get("res") == "D":
+            cur, start = 0, None
+            continue
+        if cur == 0:
+            start = m["date"]
+        cur += 1
+        if cur > best:
+            best, best_span = cur, (start, m["date"])
+    draws = sum(1 for m in tmatches if m.get("res") == "D")
+    return streak, best, best_span, draws
+
+
+def team_summaries(codes=None, min_matches=5):
+    """Serie bez remisu liczone osobno dla każdej drużyny (nie całej ligi)."""
+    if codes is None:
+        codes = [lg.code for lg in LEAGUES if lg.fit == "pasuje"]
+    codes = tuple(codes)
+    key = f"teams:{','.join(codes)}:{min_matches}"
+
+    def build():
+        out = []
+        for code in codes:
+            rows = matches(code)
+            if not rows:
+                continue
+            lg = BY_CODE.get(code)
+            if not lg:
+                continue
+            by_team = defaultdict(list)
+            for m in rows:
+                by_team[m["home"]].append(m)
+                by_team[m["away"]].append(m)
+            fx = next_fixtures(code, limit=80)
+            for team, tmatches in by_team.items():
+                tmatches = sorted(tmatches, key=_sort_key)
+                if len(tmatches) < min_matches:
+                    continue
+                streak, longest, span, draws = _team_streak_stats(tmatches)
+                nxt = next((f for f in fx if f["home"] == team or f["away"] == team), None)
+                out.append({
+                    "team": team,
+                    "code": code,
+                    "league": lg,
+                    "n": len(tmatches),
+                    "draws": draws,
+                    "draw_rate": draws / len(tmatches),
+                    "current_streak": streak,
+                    "longest": longest,
+                    "longest_span": span,
+                    "last": tmatches[-1],
+                    "next": nxt,
+                    "opponent": (nxt["away"] if nxt["home"] == team else nxt["home"]) if nxt else None,
+                    "venue": ("H" if nxt["home"] == team else "A") if nxt else None,
+                })
+        out.sort(key=lambda t: (-t["current_streak"], -t["longest"], t["draw_rate"], t["team"]))
+        return out
+
+    return memo(key, build)
+
+
+def team_recommendations(threshold=5, limit=12, codes=None):
+    """Drużyny z najdłuższą bieżącą serią bez remisu (≥ próg X)."""
+    x = int(threshold)
+    rows = [t for t in team_summaries(codes=codes) if t["current_streak"] >= x]
+    for t in rows:
+        t["rec_alert"] = True
+        t["rec_reason"] = f"Seria {t['current_streak']} ≥ X={x}"
+    return rows[:limit]

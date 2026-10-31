@@ -3,13 +3,17 @@
 {% block content %}
 <div class="topbar">
   <h1>Ligi – {{ market.name if market is defined else "Remisy" }}</h1>
-  <span class="meta">{{ rows|length }} lig ·
-    <a href="?fit=pasuje">pasujące ({{ n_fit }})</a> ·
-    <a href="?fit=częściowo">częściowo</a> ·
-    <a href="?fit=">wszystkie</a> · sortuj:
-    <a href="?sort=overlap&fit={{ fit }}">nakładanie</a> · <a href="?sort=streak&fit={{ fit }}">seria</a> ·
-    <a href="?sort=draws&fit={{ fit }}">remisy</a> · <a href="?sort=longest&fit={{ fit }}">rekord</a>
-  </span>
+</div>
+<div class="filter-bar" role="navigation" aria-label="Filtry lig">
+  <span class="muted">{{ rows|length }} lig</span>
+  <a class="chip {{ 'active' if fit == 'pasuje' }}" href="?fit=pasuje&sort={{ sort }}&market={{ market.key if market is defined else 'draw' }}">pasujące ({{ n_fit }})</a>
+  <a class="chip {{ 'active' if fit == 'częściowo' }}" href="?fit=częściowo&sort={{ sort }}&market={{ market.key if market is defined else 'draw' }}">częściowo</a>
+  <a class="chip {{ 'active' if not fit }}" href="?fit=&sort={{ sort }}&market={{ market.key if market is defined else 'draw' }}">wszystkie</a>
+  <span class="muted sep">sortuj</span>
+  <a class="chip {{ 'active' if sort == 'overlap' }}" href="?sort=overlap&fit={{ fit }}&market={{ market.key if market is defined else 'draw' }}">nakładanie</a>
+  <a class="chip {{ 'active' if sort == 'streak' }}" href="?sort=streak&fit={{ fit }}&market={{ market.key if market is defined else 'draw' }}">seria</a>
+  <a class="chip {{ 'active' if sort == 'draws' }}" href="?sort=draws&fit={{ fit }}&market={{ market.key if market is defined else 'draw' }}">remisy</a>
+  <a class="chip {{ 'active' if sort == 'longest' }}" href="?sort=longest&fit={{ fit }}&market={{ market.key if market is defined else 'draw' }}">rekord</a>
 </div>
 <div class="callout">
   <strong>168 lig świata (FotMob).</strong> „Ta sama godzina” = odsetek meczów startujących jednocześnie z innym

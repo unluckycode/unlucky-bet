@@ -3,12 +3,12 @@
 {% block content %}
 {% set mk = market %}
 <div class="topbar">
-  <div>
+  <div class="topbar-copy">
     <h1>{{ mk.title }}</h1>
-    <p class="muted" style="margin:4px 0 0">{{ mk.blurb }}</p>
+    <p class="muted blurb">{{ mk.blurb }}</p>
   </div>
-  <form method="post" action="/odswiez" class="meta">
-    <span title="Wyniki i terminarz: FotMob">Dane aktualne na: <strong>{{ live_refresh|utcpl }}</strong></span>
+  <form method="post" action="/odswiez" class="meta refresh-meta">
+    <span title="Wyniki i terminarz: FotMob">Aktualne: <strong>{{ live_refresh|utcpl }}</strong></span>
     <button class="btn small" {{ 'disabled' if refreshing }}>↻ Odśwież</button>
   </form>
 </div>
